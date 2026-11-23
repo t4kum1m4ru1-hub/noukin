@@ -130,7 +130,8 @@ class _ProfileSettingsScreenState extends State<ProfileSettingsScreen> {
     });
     try {
       await widget.appState.signInWithGoogle();
-    } catch (_) {
+    } catch (e, st) {
+      debugPrint('Google Sign-In failed: $e\n$st');
       if (mounted) {
         ScaffoldMessenger.maybeOf(context)
           ?..hideCurrentSnackBar()
