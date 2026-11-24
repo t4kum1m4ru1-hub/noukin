@@ -882,6 +882,9 @@ void main() {
         await pumpNoukinApp(tester, clock: fixedClock(kClockDaytime1300));
         await tapNavTab(tester, 'nav_tab_custom');
 
+        await tapKey(tester, 'btn_sub_controls');
+        await tapKey(tester, 'sub_control_injury_filter');
+
         expect(
           find.byKey(const Key('injury_filter_section')),
           findsOneWidget,
@@ -889,6 +892,7 @@ void main() {
 
         await tapKey(tester, 'injury_toggle_m0');
         await tapKey(tester, 'injury_toggle_m3');
+        await tapKey(tester, 'btn_back_injury_filter');
 
         final prefs = await SharedPreferences.getInstance();
         final states = await LocalWorkoutRepository(prefs).loadMuscleStates();
@@ -918,10 +922,13 @@ void main() {
     );
 
     testWidgets(
-      'T1-F10-03: group_batch_section updates P_i/B_i/S_i across all muscles in selected group',
+      'T1-F10-03: group_batch_section updates P_i across all muscles in selected group',
       (WidgetTester tester) async {
         await pumpNoukinApp(tester, clock: fixedClock(kClockDaytime1300));
         await tapNavTab(tester, 'nav_tab_custom');
+
+        await tapKey(tester, 'btn_sub_controls');
+        await tapKey(tester, 'sub_control_group_batch');
 
         expect(find.byKey(const Key('group_batch_section')), findsOneWidget);
         for (final group in MuscleGroup.values) {
@@ -940,145 +947,7 @@ void main() {
         final repo = LocalWorkoutRepository(prefs);
         final before = await repo.loadMuscleStates();
 
-        await scrollToWidgetByKey(tester, 'group_batch_chest');
-        final chestGroup = find.byKey(const Key('group_batch_chest'));
-        await tester.ensureVisible(chestGroup);
-
-        List<Finder> findIncrementButtonsIn(Finder root) {
-          final iconAdds = find.descendant(
-            of: root,
-            matching: find.byIcon(Icons.add),
-          );
-          if (iconAdds.evaluate().isNotEmpty) {
-            return List<Finder>.generate(
-              iconAdds.evaluate().length,
-              iconAdds.at,
-            );
-          }
-          for (final label in const <String>['+1', '+5', '+']) {
-            final textButtons = find.descendant(
-              of: root,
-              matching: find.byWidgetPredicate(
-                (w) => w is ButtonStyleButton,
-              ),
-            );
-            final matchingBtns = <Finder>[];
-            for (var i = 0; i < textButtons.evaluate().length; i++) {
-              final btnFinder = textButtons.at(i);
-              if (_extractAllText(tester, btnFinder).contains(label)) {
-                matchingBtns.add(btnFinder);
-              }
-            }
-            if (matchingBtns.isNotEmpty) {
-              return matchingBtns;
-            }
-            final exactLabelText = find.descendant(
-              of: root,
-              matching: find.text(label),
-            );
-            if (exactLabelText.evaluate().isNotEmpty) {
-              return List<Finder>.generate(
-                exactLabelText.evaluate().length,
-                exactLabelText.at,
-              );
-            }
-          }
-          return const <Finder>[];
-        }
-
-        var chestControls = findIncrementButtonsIn(chestGroup);
-        if (chestControls.isEmpty) {
-          await tester.tap(chestGroup);
-          await tester.pumpAndSettle();
-          chestControls = findIncrementButtonsIn(chestGroup);
-        }
-
-        var tappedAny = false;
-        if (chestControls.isNotEmpty) {
-          for (final control in chestControls) {
-            await tester.ensureVisible(control);
-            await tester.tap(control);
-            await tester.pumpAndSettle();
-            tappedAny = true;
-          }
-        } else {
-          // Section-level controls fallback (only when group_batch_chest is a
-          // selector without child buttons): exclude any non-chest group_batch_*
-          // subtrees and prefer chest-labeled rows if present.
-          bool isInsideNonChestGroup(Element element) {
-            var insideOther = false;
-            element.visitAncestorElements((ancestor) {
-              final key = ancestor.widget.key;
-              if (key is ValueKey<String> &&
-                  key.value.startsWith('group_batch_') &&
-                  key.value != 'group_batch_chest' &&
-                  key.value != 'group_batch_section') {
-                insideOther = true;
-                return false;
-              }
-              return true;
-            });
-            return insideOther;
-          }
-
-          bool hasChestAncestorRowWithoutOtherGroup(Element element) {
-            var foundChestRow = false;
-            element.visitAncestorElements((ancestor) {
-              final widget = ancestor.widget;
-              if (widget.key == const Key('group_batch_section')) {
-                return false;
-              }
-              if (widget is Row || widget is Card || widget is ListTile) {
-                final rowText = _extractAllText(
-                  tester,
-                  find.byElementPredicate((e) => identical(e, ancestor)),
-                );
-                if (rowText.contains('胸') &&
-                    !rowText.contains('脚') &&
-                    !rowText.contains('背中') &&
-                    !rowText.contains('肩') &&
-                    !rowText.contains('腕') &&
-                    !rowText.contains('体幹')) {
-                  foundChestRow = true;
-                  return false;
-                }
-              }
-              return true;
-            });
-            return foundChestRow;
-          }
-
-          final section = find.byKey(const Key('group_batch_section'));
-          final sectionCandidates = findIncrementButtonsIn(section)
-              .where(
-                (f) =>
-                    f.evaluate().isNotEmpty &&
-                    !isInsideNonChestGroup(f.evaluate().first),
-              )
-              .toList();
-          final chestLabeledCandidates = sectionCandidates
-              .where(
-                (f) => hasChestAncestorRowWithoutOtherGroup(f.evaluate().first),
-              )
-              .toList();
-          final targetsToTap = chestLabeledCandidates.isNotEmpty
-              ? chestLabeledCandidates
-              : sectionCandidates;
-
-          for (final control in targetsToTap) {
-            await tester.ensureVisible(control);
-            await tester.tap(control);
-            await tester.pumpAndSettle();
-            tappedAny = true;
-          }
-        }
-
-        expect(
-          tappedAny,
-          isTrue,
-          reason:
-              'Expected increment controls in group_batch_chest or chest-scoped section controls',
-        );
+        await tapKey(tester, 'group_batch_inc_chest');
 
         final after = await repo.loadMuscleStates();
         final chestIds = kExpectedMuscleSpecs
@@ -1086,15 +955,12 @@ void main() {
             .map((m) => m.id)
             .toList();
         final changedChest = chestIds.any(
-          (id) =>
-              after[id]!.blankDays != before[id]!.blankDays ||
-              after[id]!.stimulationDays != before[id]!.stimulationDays ||
-              after[id]!.priorityP != before[id]!.priorityP,
+          (id) => after[id]!.priorityP != before[id]!.priorityP,
         );
         expect(
           changedChest,
           isTrue,
-          reason: 'Chest batch controls must mutate chest muscle states',
+          reason: 'Chest batch controls must mutate chest muscle priorities',
         );
         // Non-chest muscle m0 must remain unchanged
         expect(after['m0'], before['m0']);
@@ -1102,7 +968,7 @@ void main() {
     );
 
     testWidgets(
-      'T1-F10-04: muscle_matrix_list displays all 54 muscles (m0..m53) with live M-score',
+      'T1-F10-04: muscle_matrix_list displays all 54 muscles (m0..m53) with blank days and priority tier',
       (WidgetTester tester) async {
         await pumpNoukinApp(tester, clock: fixedClock(kClockDaytime1300));
         await tapNavTab(tester, 'nav_tab_custom');
@@ -1114,7 +980,8 @@ void main() {
         final rowM0 = find.byKey(const Key('matrix_row_m0'));
         await tester.scrollUntilVisible(rowM0, 200.0, scrollable: scrollable);
         expect(_readTextByKey(tester, 'matrix_row_m0'), contains('大腿四頭筋'));
-        expect(_readTextByKey(tester, 'matrix_row_m0'), contains('17.0'));
+        expect(_readTextByKey(tester, 'matrix_row_m0'), contains('ブランク: 4日'));
+        expect(_readTextByKey(tester, 'matrix_row_m0'), contains('最優先'));
 
         for (final id in const <String>['m10', 'm27', 'm34', 'm44', 'm53']) {
           final row = find.byKey(Key('matrix_row_$id'));
@@ -1129,7 +996,7 @@ void main() {
     );
 
     testWidgets(
-      'T1-F10-05: individual B_i/S_i edit on matrix_row_m0 updates M-score and persists across restart',
+      'T1-F10-05: individual priority tier edit on matrix_row_m0 updates priorityP and persists across restart',
       (WidgetTester tester) async {
         await pumpNoukinApp(tester, clock: fixedClock(kClockDaytime1300));
         await tapNavTab(tester, 'nav_tab_custom');
@@ -1143,35 +1010,11 @@ void main() {
         final repo = LocalWorkoutRepository(prefs);
         final beforeM0 = (await repo.loadMuscleStates())['m0']!;
 
-        final inlineAdds = find.descendant(
-          of: rowM0,
-          matching: find.byIcon(Icons.add),
-        );
-        if (inlineAdds.evaluate().isNotEmpty) {
-          await tester.ensureVisible(inlineAdds.first);
-          await tester.tap(inlineAdds.first);
-          await tester.pumpAndSettle();
-        } else {
-          await tester.tap(rowM0);
-          await tester.pumpAndSettle();
-          final modalAdds = find.byIcon(Icons.add);
-          if (modalAdds.evaluate().isNotEmpty) {
-            await tester.tap(modalAdds.first);
-            await tester.pumpAndSettle();
-          }
-          final saveBtn = find.textContaining('保存');
-          if (saveBtn.evaluate().isNotEmpty) {
-            await tester.tap(saveBtn.last);
-            await tester.pumpAndSettle();
-          }
-        }
+        await tapKey(tester, 'priority_dec_m0');
 
         final afterM0 = (await repo.loadMuscleStates())['m0']!;
-        expect(
-          afterM0.blankDays != beforeM0.blankDays ||
-              afterM0.stimulationDays != beforeM0.stimulationDays,
-          isTrue,
-        );
+        expect(afterM0.priorityP, isNot(equals(beforeM0.priorityP)));
+        expect(afterM0.priorityP, equals(14));
 
         await restartNoukinApp(tester, clock: fixedClock(kClockDaytime1300));
         final reloadedM0 = (await repo.loadMuscleStates())['m0']!;

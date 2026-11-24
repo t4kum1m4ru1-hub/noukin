@@ -62,64 +62,6 @@ Future<List<String>> _collectAndCompleteA2Exercises(
   return titles;
 }
 
-/// Attempts to increment `B_i` inside a Screen B group batch widget (`group_batch_*`)
-/// using opaque-box UI patterns (add icon / `+` button / text field).
-Future<void> _tryAdjustGroupBatchBlankDays(
-  WidgetTester tester,
-  String groupKey, {
-  int incrementSteps = 5,
-}) async {
-  final groupFinder = find.byKey(Key(groupKey));
-  if (groupFinder.evaluate().isEmpty) {
-    final scrollables = find.byType(Scrollable);
-    if (scrollables.evaluate().isNotEmpty) {
-      await tester.scrollUntilVisible(
-        groupFinder,
-        200.0,
-        scrollable: scrollables.first,
-      );
-    }
-  }
-  expect(groupFinder, findsOneWidget);
-  await tester.ensureVisible(groupFinder);
-
-  // Look for a B_i label row inside the group batch section, else add icons.
-  final bLabel = find.descendant(
-    of: groupFinder,
-    matching: find.textContaining('ブランク'),
-  );
-  final addButtons = find.descendant(
-    of: groupFinder,
-    matching: find.byIcon(Icons.add),
-  );
-  final plusOneButtons = find.descendant(
-    of: groupFinder,
-    matching: find.textContaining('+1'),
-  );
-
-  if (plusOneButtons.evaluate().isNotEmpty) {
-    final target = plusOneButtons.first;
-    await tester.ensureVisible(target);
-    for (var i = 0; i < incrementSteps; i++) {
-      await tester.tap(target);
-      await tester.pump();
-    }
-    await tester.pumpAndSettle();
-  } else if (addButtons.evaluate().isNotEmpty) {
-    // Prefer the second Icons.add if P/B/S order is used and B label exists,
-    // otherwise tap the add button closest to B_i.
-    final idx = (bLabel.evaluate().isNotEmpty && addButtons.evaluate().length >= 2)
-        ? 1
-        : 0;
-    final target = addButtons.at(idx);
-    await tester.ensureVisible(target);
-    for (var i = 0; i < incrementSteps; i++) {
-      await tester.tap(target);
-      await tester.pump();
-    }
-    await tester.pumpAndSettle();
-  }
-}
 
 void main() {
   const generator = WorkoutMenuGenerator();
@@ -681,12 +623,17 @@ void main() {
       );
 
       await tapNavTab(tester, 'nav_tab_custom');
+      await tapKey(tester, 'btn_sub_controls');
+      await tapKey(tester, 'sub_control_injury_filter');
       await tapKey(tester, 'injury_toggle_m0');
-      await _tryAdjustGroupBatchBlankDays(
-        tester,
-        'group_batch_chest',
-        incrementSteps: 5,
-      );
+      await tapKey(tester, 'btn_back_injury_filter');
+
+      await tapKey(tester, 'btn_sub_controls');
+      await tapKey(tester, 'sub_control_group_batch');
+      await tapKey(tester, 'group_batch_inc_chest');
+      await tapKey(tester, 'group_batch_dec_back');
+      await tapKey(tester, 'group_batch_dec_legsGlutes');
+      await tapKey(tester, 'btn_back_group_batch');
 
       await tapNavTab(tester, 'nav_tab_training');
       await tapKey(tester, 'course_standard');
@@ -836,8 +783,11 @@ void main() {
 
       await tapNavTab(tester, 'nav_tab_custom');
       await selectOptionInControl(tester, 'purpose_selector', '健康維持');
+      await tapKey(tester, 'btn_sub_controls');
+      await tapKey(tester, 'sub_control_injury_filter');
       await tapKey(tester, 'injury_toggle_m0');
       await tapKey(tester, 'injury_toggle_m3');
+      await tapKey(tester, 'btn_back_injury_filter');
 
       await restartNoukinApp(
         tester,

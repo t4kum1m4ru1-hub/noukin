@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:noukin/app.dart';
+import 'package:noukin/data/master_data.dart';
 import 'package:noukin/models/models.dart';
 import 'package:noukin/state/app_state.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -21,13 +22,15 @@ void main() {
         expect(find.byKey(const Key('btn_start_workout')), findsOneWidget);
         expect(find.byKey(const Key('detected_timeslot_badge')), findsOneWidget);
 
-        // Navigate to Screen B
+        // Navigate to Screen B (new 3-screen main view)
         await tester.tap(find.byKey(const Key('nav_tab_custom')));
         await tester.pumpAndSettle();
         expect(find.byKey(const Key('purpose_selector')), findsOneWidget);
-        expect(find.byKey(const Key('injury_filter_section')), findsOneWidget);
-        expect(find.byKey(const Key('group_batch_section')), findsOneWidget);
+        expect(find.byKey(const Key('btn_sub_controls')), findsOneWidget);
         expect(find.byKey(const Key('muscle_matrix_list')), findsOneWidget);
+        // Sub-screens are not rendered inline on the main custom screen
+        expect(find.byKey(const Key('injury_filter_section')), findsNothing);
+        expect(find.byKey(const Key('group_batch_section')), findsNothing);
 
         // Navigate to Screen C
         await tester.tap(find.byKey(const Key('nav_tab_settings')));
@@ -43,6 +46,150 @@ void main() {
         await tester.tap(find.byKey(const Key('nav_tab_training')));
         await tester.pumpAndSettle();
         expect(find.byKey(const Key('btn_start_workout')), findsOneWidget);
+      },
+    );
+
+    testWidgets(
+      'Custom Settings 3-screen flow: priority tiers (0/10/14/18), group batch, and injury filter',
+      (WidgetTester tester) async {
+        final appState = AppState(clock: () => DateTime(2026, 11, 20, 12, 0));
+        await appState.initialize();
+
+        await tester.pumpWidget(NoukinApp(appState: appState));
+        await tester.pumpAndSettle();
+
+        // Open Screen B
+        await tester.tap(find.byKey(const Key('nav_tab_custom')));
+        await tester.pumpAndSettle();
+
+        // Main card shows muscle name (group), blank days, and 4-tier selector only
+        final rowM0 = find.byKey(const Key('matrix_row_m0'));
+        expect(rowM0, findsOneWidget);
+        expect(
+          find.descendant(of: rowM0, matching: find.text('大腿四頭筋（脚・臀部）')),
+          findsOneWidget,
+        );
+        expect(
+          find.descendant(of: rowM0, matching: find.text('ブランク: 4日')),
+          findsOneWidget,
+        );
+        expect(
+          find.descendant(of: rowM0, matching: find.text('最優先')),
+          findsOneWidget,
+        );
+        expect(
+          find.descendant(of: rowM0, matching: find.textContaining('M:')),
+          findsNothing,
+        );
+        expect(
+          find.descendant(of: rowM0, matching: find.textContaining('S:')),
+          findsNothing,
+        );
+
+        // Step down m0 priority across all 4 tiers: 18 -> 14 -> 10 -> 0
+        await tester.tap(find.byKey(const Key('priority_dec_m0')));
+        await tester.pumpAndSettle();
+        expect(appState.muscleStates['m0']!.priorityP, 14);
+        expect(
+          find.descendant(of: rowM0, matching: find.text('優先')),
+          findsOneWidget,
+        );
+
+        await tester.tap(find.byKey(const Key('priority_dec_m0')));
+        await tester.pumpAndSettle();
+        expect(appState.muscleStates['m0']!.priorityP, 10);
+        expect(
+          find.descendant(of: rowM0, matching: find.text('標準')),
+          findsOneWidget,
+        );
+
+        await tester.tap(find.byKey(const Key('priority_dec_m0')));
+        await tester.pumpAndSettle();
+        expect(appState.muscleStates['m0']!.priorityP, 0);
+        expect(
+          find.descendant(of: rowM0, matching: find.text('対象外')),
+          findsOneWidget,
+        );
+        expect(appState.computeCurrentMuscleScores()['m0']!.mVal, 0.0);
+
+        // Open Sub Controls -> Group Batch Adjustment Screen
+        await tester.tap(find.byKey(const Key('btn_sub_controls')));
+        await tester.pumpAndSettle();
+        expect(
+          find.byKey(const Key('sub_control_group_batch')),
+          findsOneWidget,
+        );
+        expect(
+          find.byKey(const Key('sub_control_injury_filter')),
+          findsOneWidget,
+        );
+
+        await tester.tap(find.byKey(const Key('sub_control_group_batch')));
+        await tester.pumpAndSettle();
+        expect(find.byKey(const Key('group_batch_section')), findsOneWidget);
+        for (final group in MuscleGroup.values) {
+          expect(
+            find.byKey(Key('group_batch_${group.name}')),
+            findsOneWidget,
+          );
+        }
+
+        // Batch adjust chest group priority up or down
+        final chestMuscles = MasterData.muscles
+            .where((m) => m.group == MuscleGroup.chest)
+            .map((m) => m.id)
+            .toList();
+        await tester.tap(find.byKey(const Key('group_batch_inc_chest')));
+        await tester.pumpAndSettle();
+        final expectedChestP = appState.muscleStates[chestMuscles.first]!.priorityP;
+        expect([10, 14, 18], contains(expectedChestP));
+        for (final id in chestMuscles) {
+          expect(appState.muscleStates[id]!.priorityP, expectedChestP);
+        }
+
+        // Return to Custom main screen
+        await tester.tap(find.byKey(const Key('btn_back_group_batch')));
+        await tester.pumpAndSettle();
+        expect(find.byKey(const Key('btn_sub_controls')), findsOneWidget);
+
+        // Open Sub Controls -> Injury Filter Screen
+        await tester.tap(find.byKey(const Key('btn_sub_controls')));
+        await tester.pumpAndSettle();
+        await tester.tap(find.byKey(const Key('sub_control_injury_filter')));
+        await tester.pumpAndSettle();
+        expect(find.byKey(const Key('injury_filter_section')), findsOneWidget);
+
+        final m0Chip = find.byKey(const Key('injury_toggle_m0'));
+        // Unselected chip has no warning icon
+        expect(
+          find.descendant(
+            of: m0Chip,
+            matching: find.byIcon(Icons.warning_amber_rounded),
+          ),
+          findsNothing,
+        );
+
+        // Select m0 as injured -> warning icon appears and M = 0
+        await tester.tap(m0Chip);
+        await tester.pumpAndSettle();
+        expect(appState.muscleStates['m0']!.isInjured, isTrue);
+        expect(
+          find.descendant(
+            of: m0Chip,
+            matching: find.byIcon(Icons.warning_amber_rounded),
+          ),
+          findsOneWidget,
+        );
+        expect(appState.computeCurrentMuscleScores()['m0']!.mVal, 0.0);
+        expect(
+          appState.computeCurrentMuscleScores()['m0']!.status,
+          MuscleScoreStatus.injured,
+        );
+
+        // Return to Custom main screen
+        await tester.tap(find.byKey(const Key('btn_back_injury_filter')));
+        await tester.pumpAndSettle();
+        expect(find.byKey(const Key('btn_sub_controls')), findsOneWidget);
       },
     );
 

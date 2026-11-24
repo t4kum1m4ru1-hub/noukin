@@ -4,8 +4,11 @@ import '../data/master_data.dart';
 import '../models/models.dart';
 import '../state/app_state.dart';
 import '../theme/app_colors.dart';
+import '../widgets/priority_tier_selector.dart';
+import 'group_batch_adjustment_screen.dart';
+import 'injury_filter_screen.dart';
 
-/// 画面 B: 機能設定＆カスタム（目的選択・ケガ部位フィルター・部位グループ一括調整・全54筋肉M値マトリクス）
+/// 画面 B: カスタム設定メイン画面（トレーニング目的・サブコントロール・全54筋肉の優先度設定）
 class CustomSettingsScreen extends StatelessWidget {
   final AppState appState;
 
@@ -16,9 +19,9 @@ class CustomSettingsScreen extends StatelessWidget {
     return ListenableBuilder(
       listenable: appState,
       builder: (context, _) {
-        final scores = appState.computeCurrentMuscleScores();
         final states = appState.muscleStates;
         final currentPurpose = appState.profile.purpose;
+        final injuredCount = states.values.where((s) => s.isInjured).length;
 
         return Scaffold(
           backgroundColor: AppColors.background,
@@ -46,12 +49,22 @@ class CustomSettingsScreen extends StatelessWidget {
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
                       _buildPurposeSection(currentPurpose),
-                      const SizedBox(height: 20),
-                      _buildInjuryFilterSection(states),
-                      const SizedBox(height: 20),
-                      _buildGroupBatchSection(),
-                      const SizedBox(height: 20),
-                      _buildMatrixSection(states, scores),
+                      const SizedBox(height: 12),
+                      _buildSubControlButton(context, injuredCount),
+                      const SizedBox(height: 16),
+                      for (final muscle in MasterData.muscles) ...[
+                        _buildMuscleCard(
+                          muscle: muscle,
+                          state:
+                              states[muscle.id] ??
+                              MuscleInputState(
+                                muscleId: muscle.id,
+                                priorityP: 10,
+                              ),
+                        ),
+                        if (muscle != MasterData.muscles.last)
+                          const SizedBox(height: 8),
+                      ],
                     ],
                   ),
                 ),
@@ -63,42 +76,9 @@ class CustomSettingsScreen extends StatelessWidget {
     );
   }
 
-  Widget _buildSectionHeader({
-    required IconData icon,
-    required String title,
-    required String subtitle,
-  }) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Row(
-          children: [
-            Icon(icon, color: AppColors.tealAccent, size: 20),
-            const SizedBox(width: 8),
-            Expanded(
-              child: Text(
-                title,
-                style: const TextStyle(
-                  fontSize: 16,
-                  fontWeight: FontWeight.bold,
-                  color: AppColors.textPrimary,
-                ),
-              ),
-            ),
-          ],
-        ),
-        const SizedBox(height: 4),
-        Text(
-          subtitle,
-          style: const TextStyle(fontSize: 12, color: AppColors.textSecondary),
-        ),
-      ],
-    );
-  }
-
   Widget _buildPurposeSection(TrainingPurpose currentPurpose) {
     return Container(
-      padding: const EdgeInsets.all(16),
+      padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
         color: AppColors.surface,
         borderRadius: BorderRadius.circular(14),
@@ -107,12 +87,21 @@ class CustomSettingsScreen extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          _buildSectionHeader(
-            icon: Icons.flag_outlined,
-            title: '1. トレーニング目的',
-            subtitle: '目的に応じた優先度テンプレート（P）を全54筋肉へ配分します',
+          const Row(
+            children: [
+              Icon(Icons.flag_outlined, color: AppColors.tealAccent, size: 18),
+              SizedBox(width: 8),
+              Text(
+                'トレーニング目的',
+                style: TextStyle(
+                  fontSize: 14,
+                  fontWeight: FontWeight.bold,
+                  color: AppColors.textPrimary,
+                ),
+              ),
+            ],
           ),
-          const SizedBox(height: 12),
+          const SizedBox(height: 10),
           InputDecorator(
             decoration: const InputDecoration(
               contentPadding: EdgeInsets.symmetric(horizontal: 14, vertical: 4),
@@ -156,429 +145,259 @@ class CustomSettingsScreen extends StatelessWidget {
     );
   }
 
-  Widget _buildInjuryFilterSection(Map<String, MuscleInputState> states) {
-    final injuredCount = states.values.where((s) => s.isInjured).length;
-    return Container(
-      key: const Key('injury_filter_section'),
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: AppColors.surface,
+  Widget _buildSubControlButton(BuildContext context, int injuredCount) {
+    return Material(
+      color: AppColors.surface,
+      shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: AppColors.border),
+        side: const BorderSide(color: AppColors.border),
       ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          _buildSectionHeader(
-            icon: Icons.healing_outlined,
-            title: '2. ケガ部位フィルター（選択中: $injuredCount 部位）',
-            subtitle: '選択された筋肉は M = 0 となり、対象マシンが候補から完全除外されます',
-          ),
-          const SizedBox(height: 12),
-          Wrap(
-            spacing: 6,
-            runSpacing: 6,
-            children: MasterData.muscles.map((muscle) {
-              final isInjured = states[muscle.id]?.isInjured ?? false;
-              return Material(
-                color: isInjured
-                    ? AppColors.error.withValues(alpha: 0.22)
-                    : AppColors.surfaceVariant,
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(18),
-                  side: BorderSide(
-                    color: isInjured ? AppColors.error : AppColors.border,
-                    width: isInjured ? 1.5 : 1.0,
-                  ),
-                ),
-                child: InkWell(
-                  key: Key('injury_toggle_${muscle.id}'),
-                  borderRadius: BorderRadius.circular(18),
-                  onTap: () => appState.toggleMuscleInjury(muscle.id),
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 10,
-                      vertical: 6,
-                    ),
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Icon(
-                          isInjured
-                              ? Icons.cancel
-                              : Icons.check_circle_outline,
-                          size: 14,
-                          color: isInjured
-                              ? AppColors.error
-                              : AppColors.textSecondary,
-                        ),
-                        const SizedBox(width: 4),
-                        Flexible(
-                          child: Text(
-                            muscle.name,
-                            style: TextStyle(
-                              fontSize: 12,
-                              fontWeight: isInjured
-                                  ? FontWeight.bold
-                                  : FontWeight.normal,
-                              color: isInjured
-                                  ? AppColors.error
-                                  : AppColors.textPrimary,
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-              );
-            }).toList(),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildGroupBatchSection() {
-    return Container(
-      key: const Key('group_batch_section'),
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: AppColors.surface,
+      child: InkWell(
+        key: const Key('btn_sub_controls'),
         borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: AppColors.border),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          _buildSectionHeader(
-            icon: Icons.tune,
-            title: '3. 部位グループ別 一括調整（6大カテゴリ）',
-            subtitle: 'カテゴリ単位でブランク（B）・優先度（P）・刺激（S）を一括増減します',
-          ),
-          const SizedBox(height: 12),
-          for (final group in MuscleGroup.values) ...[
-            _buildGroupBatchCard(group),
-            if (group != MuscleGroup.values.last) const SizedBox(height: 10),
-          ],
-        ],
-      ),
-    );
-  }
-
-  Widget _buildGroupBatchCard(MuscleGroup group) {
-    return Container(
-      key: Key('group_batch_${group.name}'),
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: AppColors.surfaceVariant,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: AppColors.border),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Text(
-            group.label,
-            style: const TextStyle(
-              fontSize: 14,
-              fontWeight: FontWeight.bold,
-              color: AppColors.tealAccent,
-            ),
-          ),
-          const SizedBox(height: 8),
-          Row(
+        onTap: () => _showSubControlSheet(context, injuredCount),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+          child: Row(
             children: [
+              const Icon(Icons.tune, color: AppColors.tealAccent, size: 20),
+              const SizedBox(width: 12),
               const Expanded(
                 child: Text(
-                  'ブランク (B)',
+                  'サブコントロール',
                   style: TextStyle(
-                    fontSize: 12,
-                    color: AppColors.textSecondary,
-                  ),
-                ),
-              ),
-              _buildSmallIconBtn(
-                icon: Icons.remove,
-                onTap: () => appState.applyGroupBatchAdjustment(
-                  group,
-                  blankDaysDelta: -1,
-                ),
-              ),
-              const SizedBox(width: 6),
-              _buildSmallIconBtn(
-                icon: Icons.add,
-                onTap: () => appState.applyGroupBatchAdjustment(
-                  group,
-                  blankDaysDelta: 1,
-                ),
-              ),
-              const SizedBox(width: 6),
-              TextButton(
-                onPressed: () => appState.applyGroupBatchAdjustment(
-                  group,
-                  blankDaysDelta: 5,
-                ),
-                style: TextButton.styleFrom(
-                  backgroundColor: AppColors.highlightSelectedSurface,
-                  foregroundColor: AppColors.tealAccent,
-                  minimumSize: const Size(44, 34),
-                  padding: const EdgeInsets.symmetric(horizontal: 10),
-                ),
-                child: const Text(
-                  '+5',
-                  style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold),
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 6),
-          Row(
-            children: [
-              const Expanded(
-                child: Text(
-                  '優先度 (P)',
-                  style: TextStyle(
-                    fontSize: 12,
-                    color: AppColors.textSecondary,
-                  ),
-                ),
-              ),
-              _buildSmallIconBtn(
-                icon: Icons.remove,
-                onTap: () => appState.applyGroupBatchAdjustment(
-                  group,
-                  priorityDelta: -1,
-                ),
-              ),
-              const SizedBox(width: 6),
-              _buildSmallIconBtn(
-                icon: Icons.add,
-                onTap: () =>
-                    appState.applyGroupBatchAdjustment(group, priorityDelta: 1),
-              ),
-            ],
-          ),
-          const SizedBox(height: 6),
-          Row(
-            children: [
-              const Expanded(
-                child: Text(
-                  '刺激 (S)',
-                  style: TextStyle(
-                    fontSize: 12,
-                    color: AppColors.textSecondary,
-                  ),
-                ),
-              ),
-              _buildSmallIconBtn(
-                icon: Icons.remove,
-                onTap: () => appState.applyGroupBatchAdjustment(
-                  group,
-                  stimulationDaysDelta: -0.5,
-                ),
-              ),
-              const SizedBox(width: 6),
-              _buildSmallIconBtn(
-                icon: Icons.add,
-                onTap: () => appState.applyGroupBatchAdjustment(
-                  group,
-                  stimulationDaysDelta: 0.5,
-                ),
-              ),
-            ],
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildMatrixSection(
-    Map<String, MuscleInputState> states,
-    Map<String, MuscleScoreInfo> scores,
-  ) {
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: AppColors.surface,
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: AppColors.border),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          _buildSectionHeader(
-            icon: Icons.grid_view_rounded,
-            title: '4. 全54筋肉 M値マトリクス ＆ 個別パラメータ編集',
-            subtitle: '各筋肉のリアルタイムM値とブランク（B）・刺激（S）を個別調整できます',
-          ),
-          const SizedBox(height: 12),
-          for (final muscle in MasterData.muscles) ...[
-            _buildMatrixRow(
-              muscle: muscle,
-              state:
-                  states[muscle.id] ??
-                  MuscleInputState(muscleId: muscle.id, priorityP: 10),
-              score: scores[muscle.id],
-            ),
-            if (muscle != MasterData.muscles.last) const SizedBox(height: 8),
-          ],
-        ],
-      ),
-    );
-  }
-
-  Widget _buildMatrixRow({
-    required Muscle muscle,
-    required MuscleInputState state,
-    required MuscleScoreInfo? score,
-  }) {
-    final mValText = (score?.mVal ?? 0.0).toStringAsFixed(1);
-    final status = score?.status ?? MuscleScoreStatus.active;
-    final statusColor = switch (status) {
-      MuscleScoreStatus.active => AppColors.tealAccent,
-      MuscleScoreStatus.recovering => AppColors.amberAccent,
-      MuscleScoreStatus.untargeted => AppColors.textTertiary,
-      MuscleScoreStatus.injured => AppColors.error,
-    };
-
-    return Container(
-      key: Key('matrix_row_${muscle.id}'),
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: AppColors.surfaceVariant,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(
-          color: state.isInjured ? AppColors.error : AppColors.border,
-        ),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Row(
-            children: [
-              Expanded(
-                child: Text(
-                  '${muscle.name}（${muscle.group.label}）',
-                  style: const TextStyle(
-                    fontSize: 13,
+                    fontSize: 15,
                     fontWeight: FontWeight.bold,
                     color: AppColors.textPrimary,
                   ),
                 ),
               ),
-              const SizedBox(width: 8),
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                decoration: BoxDecoration(
-                  color: AppColors.background,
-                  borderRadius: BorderRadius.circular(10),
-                  border: Border.all(color: statusColor),
-                ),
-                child: Text(
-                  'M: $mValText (${status.label})',
-                  style: TextStyle(
-                    fontSize: 12,
-                    fontWeight: FontWeight.bold,
-                    color: statusColor,
+              if (injuredCount > 0) ...[
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 8,
+                    vertical: 3,
+                  ),
+                  decoration: BoxDecoration(
+                    color: AppColors.error.withValues(alpha: 0.2),
+                    borderRadius: BorderRadius.circular(10),
+                    border: Border.all(color: AppColors.error),
+                  ),
+                  child: Text(
+                    'ケガ除外 $injuredCount',
+                    style: const TextStyle(
+                      fontSize: 11,
+                      fontWeight: FontWeight.bold,
+                      color: AppColors.error,
+                    ),
                   ),
                 ),
+                const SizedBox(width: 8),
+              ],
+              const Icon(
+                Icons.chevron_right,
+                color: AppColors.textSecondary,
+                size: 20,
               ),
             ],
           ),
-          const SizedBox(height: 6),
-          Text(
-            'P: ${state.priorityP} / R: ${score?.effectiveRecoveryDays ?? muscle.recoveryDays}',
-            style: const TextStyle(
-              fontSize: 11,
-              color: AppColors.textSecondary,
-            ),
-          ),
-          const SizedBox(height: 8),
-          Wrap(
-            spacing: 12,
-            runSpacing: 8,
-            crossAxisAlignment: WrapCrossAlignment.center,
-            children: [
-              Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Text(
-                    'B: ${state.blankDays}',
-                    style: const TextStyle(
-                      fontSize: 12,
-                      fontWeight: FontWeight.w600,
-                      color: AppColors.textPrimary,
-                    ),
-                  ),
-                  const SizedBox(width: 6),
-                  _buildSmallIconBtn(
-                    icon: Icons.remove,
-                    onTap: () => appState.updateMuscleState(
-                      muscle.id,
-                      blankDays: state.blankDays - 1,
-                    ),
-                  ),
-                  const SizedBox(width: 4),
-                  _buildSmallIconBtn(
-                    icon: Icons.add,
-                    onTap: () => appState.updateMuscleState(
-                      muscle.id,
-                      blankDays: state.blankDays + 1,
-                    ),
-                  ),
-                ],
-              ),
-              Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Text(
-                    'S: ${state.stimulationDays.toStringAsFixed(1)}',
-                    style: const TextStyle(
-                      fontSize: 12,
-                      fontWeight: FontWeight.w600,
-                      color: AppColors.textPrimary,
-                    ),
-                  ),
-                  const SizedBox(width: 6),
-                  _buildSmallIconBtn(
-                    icon: Icons.remove,
-                    onTap: () => appState.updateMuscleState(
-                      muscle.id,
-                      stimulationDays: state.stimulationDays - 0.1,
-                    ),
-                  ),
-                  const SizedBox(width: 4),
-                  _buildSmallIconBtn(
-                    icon: Icons.add,
-                    onTap: () => appState.updateMuscleState(
-                      muscle.id,
-                      stimulationDays: state.stimulationDays + 0.1,
-                    ),
-                  ),
-                ],
-              ),
-            ],
-          ),
-        ],
+        ),
       ),
     );
   }
 
-  Widget _buildSmallIconBtn({
+  Future<void> _showSubControlSheet(
+    BuildContext context,
+    int injuredCount,
+  ) async {
+    await showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: AppColors.surface,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(18)),
+      ),
+      builder: (sheetContext) {
+        return SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(16, 12, 16, 20),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Center(
+                  child: Container(
+                    width: 40,
+                    height: 4,
+                    decoration: BoxDecoration(
+                      color: AppColors.trackInactive,
+                      borderRadius: BorderRadius.circular(2),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 14),
+                const Text(
+                  'サブコントロール',
+                  style: TextStyle(
+                    fontSize: 16,
+                    fontWeight: FontWeight.bold,
+                    color: AppColors.textPrimary,
+                  ),
+                ),
+                const SizedBox(height: 12),
+                _buildSubControlOption(
+                  key: const Key('sub_control_group_batch'),
+                  icon: Icons.layers_outlined,
+                  title: '部位グループ別 一括調整',
+                  subtitle: '6大カテゴリ単位で優先度をまとめて変更',
+                  onTap: () {
+                    Navigator.of(sheetContext).pop();
+                    Navigator.of(context).push(
+                      MaterialPageRoute<void>(
+                        builder: (_) =>
+                            GroupBatchAdjustmentScreen(appState: appState),
+                      ),
+                    );
+                  },
+                ),
+                const SizedBox(height: 10),
+                _buildSubControlOption(
+                  key: const Key('sub_control_injury_filter'),
+                  icon: Icons.healing_outlined,
+                  title: 'ケガ部位フィルター',
+                  subtitle: injuredCount > 0
+                      ? '選択中: $injuredCount 部位（M = 0 で除外）'
+                      : 'ケガをしている筋肉をメニュー候補から完全除外',
+                  onTap: () {
+                    Navigator.of(sheetContext).pop();
+                    Navigator.of(context).push(
+                      MaterialPageRoute<void>(
+                        builder: (_) => InjuryFilterScreen(appState: appState),
+                      ),
+                    );
+                  },
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _buildSubControlOption({
+    required Key key,
     required IconData icon,
+    required String title,
+    required String subtitle,
     required VoidCallback onTap,
   }) {
-    return IconButton.filledTonal(
-      icon: Icon(icon, size: 16),
-      onPressed: onTap,
-      constraints: const BoxConstraints(minWidth: 34, minHeight: 34),
-      padding: EdgeInsets.zero,
-      style: IconButton.styleFrom(
-        backgroundColor: AppColors.background,
-        foregroundColor: AppColors.tealAccent,
-        minimumSize: const Size(34, 34),
-        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+    return Material(
+      color: AppColors.surfaceVariant,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(12),
+        side: const BorderSide(color: AppColors.border),
+      ),
+      child: InkWell(
+        key: key,
+        borderRadius: BorderRadius.circular(12),
+        onTap: onTap,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
+          child: Row(
+            children: [
+              Icon(icon, color: AppColors.tealAccent, size: 22),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      title,
+                      style: const TextStyle(
+                        fontSize: 15,
+                        fontWeight: FontWeight.bold,
+                        color: AppColors.textPrimary,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      subtitle,
+                      style: const TextStyle(
+                        fontSize: 12,
+                        color: AppColors.textSecondary,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const Icon(
+                Icons.chevron_right,
+                color: AppColors.textSecondary,
+                size: 20,
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildMuscleCard({
+    required Muscle muscle,
+    required MuscleInputState state,
+  }) {
+    final currentTier = PriorityTier.fromPriorityP(state.priorityP);
+
+    return Container(
+      key: Key('matrix_row_${muscle.id}'),
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+      decoration: BoxDecoration(
+        color: AppColors.surface,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(
+          color: state.isInjured ? AppColors.error : AppColors.border,
+        ),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.center,
+        children: [
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  '${muscle.name}（${muscle.group.label}）',
+                  style: const TextStyle(
+                    fontSize: 14,
+                    fontWeight: FontWeight.bold,
+                    color: AppColors.textPrimary,
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  'ブランク: ${state.blankDays}日',
+                  style: const TextStyle(
+                    fontSize: 12,
+                    color: AppColors.textSecondary,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(width: 12),
+          PriorityTierSelector(
+            tier: currentTier,
+            decrementButtonKey: Key('priority_dec_${muscle.id}'),
+            incrementButtonKey: Key('priority_inc_${muscle.id}'),
+            onChanged: (nextTier) {
+              appState.updateMuscleState(
+                muscle.id,
+                priorityP: nextTier.value,
+              );
+            },
+          ),
+        ],
       ),
     );
   }

@@ -217,188 +217,6 @@ Future<void> _submitReviewAndReturnToA1(
   );
 }
 
-/// Attempts to apply a batch blank-day (`B_i`) increment or value via Screen B's
-/// `group_batch_${group.name}` section.
-Future<void> _applyGroupBatchBlankDays(
-  WidgetTester tester,
-  MuscleGroup group, {
-  required int incrementSteps,
-  bool preferPlusFiveButton = false,
-}) async {
-  final groupKey = 'group_batch_${group.name}';
-  await _ensureKeyVisible(tester, groupKey);
-  final groupWidget = find.byKey(Key(groupKey));
-  expect(groupWidget, findsOneWidget);
-
-  if (preferPlusFiveButton) {
-    final plusFive = find.descendant(
-      of: groupWidget,
-      matching: find.textContaining('+5'),
-    );
-    if (plusFive.evaluate().isNotEmpty) {
-      await tester.ensureVisible(plusFive.first);
-      await tester.tap(plusFive.first);
-      await tester.pumpAndSettle();
-      return;
-    }
-  }
-
-  // Look for an inline B_i / ブランク TextField or increment button inside groupWidget.
-  final textFields = find.descendant(
-    of: groupWidget,
-    matching: find.byType(TextField),
-  );
-  if (textFields.evaluate().isNotEmpty) {
-    final currentText =
-        tester.widget<TextField>(textFields.first).controller?.text ?? '';
-    final parsed = int.tryParse(currentText.trim()) ?? 0;
-    await tester.enterText(textFields.first, '${parsed + incrementSteps}');
-    await tester.pumpAndSettle();
-    final applyBtn = find.descendant(
-      of: groupWidget,
-      matching: find.textContaining('適用'),
-    );
-    if (applyBtn.evaluate().isNotEmpty) {
-      await tester.tap(applyBtn.first);
-      await tester.pumpAndSettle();
-    }
-    return;
-  }
-
-  // Check if there is a B_i label with an associated Icons.add button.
-  final addButtons = find.descendant(
-    of: groupWidget,
-    matching: find.byIcon(Icons.add),
-  );
-  if (addButtons.evaluate().isNotEmpty) {
-    final bLabel = find.descendant(
-      of: groupWidget,
-      matching: find.textContaining(RegExp(r'B|ブランク')),
-    );
-    Finder targetAdd = addButtons.first;
-    if (bLabel.evaluate().isNotEmpty) {
-      final bRow = find.ancestor(of: bLabel.first, matching: find.byType(Row));
-      if (bRow.evaluate().isNotEmpty) {
-        final addInBRow = find.descendant(
-          of: bRow.first,
-          matching: find.byIcon(Icons.add),
-        );
-        if (addInBRow.evaluate().isNotEmpty) {
-          targetAdd = addInBRow.first;
-        }
-      }
-    }
-    for (var i = 0; i < incrementSteps; i++) {
-      await tester.ensureVisible(targetAdd);
-      await tester.tap(targetAdd);
-      await tester.pumpAndSettle();
-    }
-    return;
-  }
-
-  // Fallback: groupWidget may be a group chip/button paired with section-level controls.
-  await tester.tap(groupWidget);
-  await tester.pumpAndSettle();
-  final section = find.byKey(const Key('group_batch_section'));
-  final dialogOrSection = find.byType(AlertDialog).evaluate().isNotEmpty
-      ? find.byType(AlertDialog)
-      : section;
-
-  if (preferPlusFiveButton) {
-    final plusFiveInSection = find.descendant(
-      of: dialogOrSection,
-      matching: find.textContaining('+5'),
-    );
-    if (plusFiveInSection.evaluate().isNotEmpty) {
-      await tester.ensureVisible(plusFiveInSection.first);
-      await tester.tap(plusFiveInSection.first);
-      await tester.pumpAndSettle();
-      return;
-    }
-  }
-
-  final addInSection = find.descendant(
-    of: dialogOrSection,
-    matching: find.byIcon(Icons.add),
-  );
-  if (addInSection.evaluate().isNotEmpty) {
-    for (var i = 0; i < incrementSteps; i++) {
-      await tester.ensureVisible(addInSection.first);
-      await tester.tap(addInSection.first);
-      await tester.pumpAndSettle();
-    }
-  }
-  final applyInDialog = find.descendant(
-    of: dialogOrSection,
-    matching: find.textContaining('適用'),
-  );
-  if (applyInDialog.evaluate().isNotEmpty) {
-    await tester.tap(applyInDialog.first);
-    await tester.pumpAndSettle();
-  }
-}
-
-/// Edits an individual muscle row `matrix_row_${muscleId}` in Screen B's
-/// `muscle_matrix_list` by tapping its increment control or edit dialog.
-Future<void> _editMatrixMuscleBlankDays(
-  WidgetTester tester,
-  String muscleId, {
-  int incrementSteps = 1,
-}) async {
-  final rowKey = 'matrix_row_$muscleId';
-  await _ensureKeyVisible(
-    tester,
-    rowKey,
-    preferredContainerKey: 'muscle_matrix_list',
-  );
-  final row = find.byKey(Key(rowKey));
-  expect(row, findsOneWidget, reason: 'Matrix row "$rowKey" must exist');
-
-  final addButtons = find.descendant(of: row, matching: find.byIcon(Icons.add));
-  if (addButtons.evaluate().isNotEmpty) {
-    for (var i = 0; i < incrementSteps; i++) {
-      await tester.ensureVisible(addButtons.first);
-      await tester.tap(addButtons.first);
-      await tester.pumpAndSettle();
-    }
-    return;
-  }
-
-  final textFields = find.descendant(of: row, matching: find.byType(TextField));
-  if (textFields.evaluate().isNotEmpty) {
-    final currentText =
-        tester.widget<TextField>(textFields.first).controller?.text ?? '';
-    final parsed = int.tryParse(currentText.trim()) ?? 4;
-    await tester.enterText(textFields.first, '${parsed + incrementSteps}');
-    await tester.pumpAndSettle();
-    return;
-  }
-
-  // Otherwise tap row to open edit dialog/sheet if supported.
-  await tester.tap(row);
-  await tester.pumpAndSettle();
-  final dialog = find.byType(AlertDialog);
-  if (dialog.evaluate().isNotEmpty) {
-    final addInDialog = find.descendant(
-      of: dialog,
-      matching: find.byIcon(Icons.add),
-    );
-    if (addInDialog.evaluate().isNotEmpty) {
-      for (var i = 0; i < incrementSteps; i++) {
-        await tester.tap(addInDialog.first);
-        await tester.pumpAndSettle();
-      }
-    }
-    final saveBtn = find.descendant(
-      of: dialog,
-      matching: find.textContaining(RegExp(r'保存|適用|OK')),
-    );
-    if (saveBtn.evaluate().isNotEmpty) {
-      await tester.tap(saveBtn.first);
-      await tester.pumpAndSettle();
-    }
-  }
-}
 
 /// Reads back persisted state into a fresh [AppState] from mock
 /// [SharedPreferences] to verify real persistence.
@@ -611,10 +429,13 @@ void main() {
         final clock = MutableTestClock(DateTime(2026, 11, 19, 22, 30, 0));
         await pumpNoukinApp(tester, clock: clock.call);
 
-        // Step 1: Injure m34 (三角筋前部) and m35 (三角筋中部) on Screen B.
+        // Step 1: Injure m34 (三角筋前部) and m35 (三角筋中部) via Injury Filter screen.
         await tapNavTab(tester, 'nav_tab_custom');
+        await _tapContractedKey(tester, 'btn_sub_controls');
+        await _tapContractedKey(tester, 'sub_control_injury_filter');
         await _tapContractedKey(tester, 'injury_toggle_m34');
         await _tapContractedKey(tester, 'injury_toggle_m35');
+        await _tapContractedKey(tester, 'btn_back_injury_filter');
 
         final afterInjury = await _loadPersistedAppState(clock.call);
         expect(afterInjury.muscleStates['m34']!.isInjured, isTrue);
@@ -795,19 +616,26 @@ void main() {
 
         await _selectOptionInSelector(tester, 'purpose_selector', 'ウィンドサーフィン');
 
-        await _applyGroupBatchBlankDays(
+        // Adjust core group priority via Group Batch Adjustment screen.
+        await _tapContractedKey(tester, 'btn_sub_controls');
+        await _tapContractedKey(tester, 'sub_control_group_batch');
+        await _tapContractedKey(tester, 'group_batch_dec_core');
+        await _tapContractedKey(tester, 'btn_back_group_batch');
+
+        // Individually raise m7 priority back up on the custom main list.
+        await _ensureKeyVisible(
           tester,
-          MuscleGroup.core,
-          incrementSteps: 4,
+          'matrix_row_m7',
+          preferredContainerKey: 'muscle_matrix_list',
         );
-        await _editMatrixMuscleBlankDays(tester, 'm7', incrementSteps: 1);
+        await _tapContractedKey(tester, 'priority_inc_m7');
 
         final afterEdits = await _loadPersistedAppState(clock.call);
         expect(afterEdits.profile.purpose, TrainingPurpose.windsurfing);
         expect(
-          afterEdits.muscleStates['m7']!.blankDays,
-          greaterThan(4),
-          reason: 'Core batch + individual edit must increase m7 blankDays',
+          afterEdits.muscleStates['m7']!.priorityP,
+          greaterThan(afterEdits.muscleStates['m8']!.priorityP),
+          reason: 'Core batch + individual priority edit must elevate m7 over m8',
         );
 
         // Step 2: Screen A1 -> Daytime badge, Standard 45m -> complete through A3.
@@ -850,9 +678,12 @@ void main() {
         await enterTextByKey(tester, 'body_weight_input', '68');
         await _tapContractedKey(tester, 'btn_save_profile');
 
-        // Step 2: Screen B injure m0, then Screen A1->A2->A3 20m workout.
+        // Step 2: Screen B injure m0 via Injury Filter screen, then Screen A1->A2->A3 20m workout.
         await tapNavTab(tester, 'nav_tab_custom');
+        await _tapContractedKey(tester, 'btn_sub_controls');
+        await _tapContractedKey(tester, 'sub_control_injury_filter');
         await _tapContractedKey(tester, 'injury_toggle_m0');
+        await _tapContractedKey(tester, 'btn_back_injury_filter');
 
         await tapNavTab(tester, 'nav_tab_training');
         await _tapContractedKey(tester, 'course_short');
@@ -931,7 +762,7 @@ void main() {
           expect(preBatchScores[mId]!.status, MuscleScoreStatus.recovering);
         }
 
-        // Step 2: Check Screen B matrix shows m0 recovering, then batch-reset legsGlutes (+5).
+        // Step 2: Check Screen B shows m0 blank days = 1, then batch-reset legsGlutes (+5) via AppState.
         await tapNavTab(tester, 'nav_tab_custom');
         if (trainedLegPrimaryIds.contains('m0')) {
           await _ensureKeyVisible(
@@ -940,16 +771,15 @@ void main() {
             preferredContainerKey: 'muscle_matrix_list',
           );
           final rowText = _readKeyText(tester, 'matrix_row_m0');
-          expect(rowText, contains('0'));
+          expect(rowText, contains('ブランク: 1日'));
         }
 
         final beforeChestB = afterWorkout.muscleStates['m3']!.blankDays;
-        await _applyGroupBatchBlankDays(
-          tester,
+        await afterWorkout.applyGroupBatchAdjustment(
           MuscleGroup.legsGlutes,
-          incrementSteps: 5,
-          preferPlusFiveButton: true,
+          blankDaysDelta: 5,
         );
+        await restartNoukinApp(tester, clock: clock.call);
 
         final afterBatch = await _loadPersistedAppState(clock.call);
         for (final mId in trainedLegPrimaryIds) {
@@ -997,11 +827,14 @@ void main() {
         final clock = MutableTestClock(DateTime(2026, 11, 19, 14, 0, 0));
         await pumpNoukinApp(tester, clock: clock.call);
 
-        // Step 1: Injure all 10 QUICK_INJURY_MUSCLES on Screen B.
+        // Step 1: Injure all 10 QUICK_INJURY_MUSCLES via Injury Filter screen.
         await tapNavTab(tester, 'nav_tab_custom');
+        await _tapContractedKey(tester, 'btn_sub_controls');
+        await _tapContractedKey(tester, 'sub_control_injury_filter');
         for (final mId in kQuickInjuryMuscleIds) {
           await _tapContractedKey(tester, 'injury_toggle_$mId');
         }
+        await _tapContractedKey(tester, 'btn_back_injury_filter');
 
         final afterAllInjured = await _loadPersistedAppState(clock.call);
         for (final mId in kQuickInjuryMuscleIds) {
@@ -1033,11 +866,14 @@ void main() {
         await _tapContractedKey(tester, 'training_back_button');
         expect(find.byKey(const Key('btn_start_workout')), findsOneWidget);
 
-        // Step 3: Clear all 10 injuries on Screen B and verify full 5-exercise menu returns.
+        // Step 3: Clear all 10 injuries via Injury Filter screen and verify full 5-exercise menu returns.
         await tapNavTab(tester, 'nav_tab_custom');
+        await _tapContractedKey(tester, 'btn_sub_controls');
+        await _tapContractedKey(tester, 'sub_control_injury_filter');
         for (final mId in kQuickInjuryMuscleIds) {
           await _tapContractedKey(tester, 'injury_toggle_$mId');
         }
+        await _tapContractedKey(tester, 'btn_back_injury_filter');
 
         await tapNavTab(tester, 'nav_tab_training');
         await _tapContractedKey(tester, 'course_full');

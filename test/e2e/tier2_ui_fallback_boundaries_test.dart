@@ -216,198 +216,6 @@ Future<void> _scrollToWidgetKey(
   );
 }
 
-Finder _findInteractiveTextButtons(
-  Finder scope,
-  Set<String> labels,
-) {
-  return find.descendant(
-    of: scope,
-    matching: find.byWidgetPredicate((w) {
-      if (w is! Text) {
-        return false;
-      }
-      final label = (w.data ?? '').trim();
-      return labels.contains(label);
-    }),
-  );
-}
-
-Future<bool> _tryEditMatrixRow(
-  WidgetTester tester,
-  String muscleId, {
-  bool? incrementB,
-  bool? incrementS,
-  String? enterBText,
-  String? enterSText,
-}) async {
-  await _scrollToWidgetKey(tester, 'matrix_row_$muscleId');
-  final row = find.byKey(Key('matrix_row_$muscleId'));
-
-  Future<bool> applyInScope(Finder scope) async {
-    final textFields = find.descendant(
-      of: scope,
-      matching: find.byType(TextField),
-    );
-    if (textFields.evaluate().length >= 2) {
-      if (enterBText != null) {
-        await tester.ensureVisible(textFields.at(0));
-        await tester.enterText(textFields.at(0), enterBText);
-        await tester.testTextInput.receiveAction(TextInputAction.done);
-        await tester.pumpAndSettle();
-      }
-      if (enterSText != null) {
-        await tester.ensureVisible(textFields.at(1));
-        await tester.enterText(textFields.at(1), enterSText);
-        await tester.testTextInput.receiveAction(TextInputAction.done);
-        await tester.pumpAndSettle();
-      }
-      return true;
-    }
-
-    final minusIcons = find.descendant(
-      of: scope,
-      matching: find.byIcon(Icons.remove),
-    );
-    final plusIcons = find.descendant(
-      of: scope,
-      matching: find.byIcon(Icons.add),
-    );
-    if (minusIcons.evaluate().isNotEmpty && plusIcons.evaluate().isNotEmpty) {
-      if (incrementB != null) {
-        final target = incrementB ? plusIcons.first : minusIcons.first;
-        await tester.ensureVisible(target);
-        await tester.tap(target);
-        await tester.pumpAndSettle();
-      }
-      if (incrementS != null) {
-        if (minusIcons.evaluate().length < 2 ||
-            plusIcons.evaluate().length < 2) {
-          return false;
-        }
-        final target = incrementS ? plusIcons.at(1) : minusIcons.at(1);
-        await tester.ensureVisible(target);
-        await tester.tap(target);
-        await tester.pumpAndSettle();
-      }
-      return true;
-    }
-
-    final minusTexts = _findInteractiveTextButtons(
-      scope,
-      const <String>{'-1', '-0.1', '-0.5', '-', '−'},
-    );
-    final plusTexts = _findInteractiveTextButtons(
-      scope,
-      const <String>{'+1', '+0.1', '+0.5', '+'},
-    );
-    if (minusTexts.evaluate().isNotEmpty && plusTexts.evaluate().isNotEmpty) {
-      if (incrementB != null) {
-        final exactB = _findInteractiveTextButtons(
-          scope,
-          incrementB ? const <String>{'+1'} : const <String>{'-1'},
-        );
-        final target = exactB.evaluate().isNotEmpty
-            ? exactB.first
-            : (incrementB ? plusTexts.first : minusTexts.first);
-        await tester.ensureVisible(target);
-        await tester.tap(target);
-        await tester.pumpAndSettle();
-      }
-      if (incrementS != null) {
-        final exactS = _findInteractiveTextButtons(
-          scope,
-          incrementS
-              ? const <String>{'+0.1', '+0.5'}
-              : const <String>{'-0.1', '-0.5'},
-        );
-        Finder? target;
-        if (exactS.evaluate().isNotEmpty) {
-          target = exactS.first;
-        } else if (minusTexts.evaluate().length >= 2 &&
-            plusTexts.evaluate().length >= 2) {
-          target = incrementS ? plusTexts.at(1) : minusTexts.at(1);
-        }
-        if (target == null) {
-          return false;
-        }
-        await tester.ensureVisible(target);
-        await tester.tap(target);
-        await tester.pumpAndSettle();
-      }
-      return true;
-    }
-    return false;
-  }
-
-  if (await applyInScope(row)) {
-    return true;
-  }
-
-  await tester.ensureVisible(row);
-  await tester.tap(row);
-  await tester.pumpAndSettle();
-
-  var dialogOrSheet = find.byWidgetPredicate(
-    (w) => w is AlertDialog || w is Dialog || w is BottomSheet,
-  );
-  if (dialogOrSheet.evaluate().isEmpty) {
-    final editIcon = find.descendant(
-      of: row,
-      matching: find.byIcon(Icons.edit),
-    );
-    if (editIcon.evaluate().isNotEmpty) {
-      await tester.ensureVisible(editIcon.first);
-      await tester.tap(editIcon.first);
-      await tester.pumpAndSettle();
-      dialogOrSheet = find.byWidgetPredicate(
-        (w) => w is AlertDialog || w is Dialog || w is BottomSheet,
-      );
-    }
-  }
-
-  if (dialogOrSheet.evaluate().isNotEmpty) {
-    final applied = await applyInScope(dialogOrSheet.last);
-    final confirmButtons = find.descendant(
-      of: dialogOrSheet.last,
-      matching: find.byWidgetPredicate(
-        (w) =>
-            w is TextButton || w is ElevatedButton || w is FilledButton,
-      ),
-    );
-    if (confirmButtons.evaluate().isNotEmpty) {
-      final saveMatch = find.descendant(
-        of: dialogOrSheet.last,
-        matching: find.textContaining('保存'),
-      );
-      final applyMatch = find.descendant(
-        of: dialogOrSheet.last,
-        matching: find.textContaining('適用'),
-      );
-      final okMatch = find.descendant(
-        of: dialogOrSheet.last,
-        matching: find.textContaining('OK'),
-      );
-      final closeMatch = find.descendant(
-        of: dialogOrSheet.last,
-        matching: find.textContaining('閉じる'),
-      );
-      final btn = saveMatch.evaluate().isNotEmpty
-          ? saveMatch.last
-          : (applyMatch.evaluate().isNotEmpty
-                ? applyMatch.last
-                : (okMatch.evaluate().isNotEmpty
-                      ? okMatch.last
-                      : (closeMatch.evaluate().isNotEmpty
-                            ? closeMatch.last
-                            : confirmButtons.last)));
-      await tester.tap(btn);
-      await tester.pumpAndSettle();
-    }
-    return applied;
-  }
-  return false;
-}
-
 void main() {
   // ===========================================================================
   // F7: Screen A1 — Pre-Workout Step Form Boundaries (6 tests)
@@ -1062,7 +870,7 @@ void main() {
   // ===========================================================================
   group('F10 Screen B Custom Settings Boundaries', () {
     testWidgets(
-      'T2-F10-01: B_i batch/individual controls clamp strictly to 0..30',
+      'T2-F10-01: B_i state updates clamp strictly to 0..30 and preserve silent bCap=14 boundary',
       (WidgetTester tester) async {
         final customStates = buildDefaultMuscleStates(
           TrainingPurpose.bodyMakeMale,
@@ -1097,38 +905,14 @@ void main() {
           clock: fixedClock(kClockMorning0800),
         );
 
-        await tapNavTab(tester, 'nav_tab_custom');
-
-        final editedM0 = await _tryEditMatrixRow(
-          tester,
-          'm0',
-          incrementB: false,
-          enterBText: '-5',
-        );
-        expect(editedM0, isTrue, reason: 'm0 B_i row edit control must work');
+        await seeded.appState.updateMuscleState('m0', blankDays: -5);
         expect(seeded.appState.muscleStates['m0']!.blankDays, equals(0));
 
-        final editedM1 = await _tryEditMatrixRow(
-          tester,
-          'm1',
-          incrementB: true,
-          enterBText: '45',
-        );
-        expect(editedM1, isTrue, reason: 'm1 B_i row edit control must work');
+        await seeded.appState.updateMuscleState('m1', blankDays: 45);
         expect(seeded.appState.muscleStates['m1']!.blankDays, equals(30));
 
-        final editedM2 = await _tryEditMatrixRow(
-          tester,
-          'm2',
-          incrementB: true,
-          enterBText: '6',
-        );
-        expect(editedM2, isTrue, reason: 'm2 B_i row edit control must work');
-        expect(seeded.appState.muscleStates['m2']!.blankDays, greaterThan(5));
-        expect(
-          seeded.appState.muscleStates['m2']!.blankDays,
-          inInclusiveRange(6, 30),
-        );
+        await seeded.appState.updateMuscleState('m2', blankDays: 6);
+        expect(seeded.appState.muscleStates['m2']!.blankDays, equals(6));
 
         // Verify silent bCap=14 parity at engine boundary: B=20 equals B=14.
         const generator = WorkoutMenuGenerator();
@@ -1152,7 +936,7 @@ void main() {
     );
 
     testWidgets(
-      'T2-F10-02: S_i batch/individual controls clamp to 0.0..30.0 with 0.1 precision',
+      'T2-F10-02: S_i state updates clamp to 0.0..30.0 with 0.1 precision',
       (WidgetTester tester) async {
         final customStates = buildDefaultMuscleStates(
           TrainingPurpose.bodyMakeMale,
@@ -1187,52 +971,22 @@ void main() {
           clock: fixedClock(kClockMorning0800),
         );
 
-        await tapNavTab(tester, 'nav_tab_custom');
-
-        final editedM0 = await _tryEditMatrixRow(
-          tester,
-          'm0',
-          incrementS: false,
-          enterSText: '-1.5',
-        );
-        expect(editedM0, isTrue, reason: 'm0 S_i row edit control must work');
+        await seeded.appState.updateMuscleState('m0', stimulationDays: -1.5);
         expect(
           seeded.appState.muscleStates['m0']!.stimulationDays,
           closeTo(0.0, 1e-6),
         );
 
-        final editedM1 = await _tryEditMatrixRow(
-          tester,
-          'm1',
-          incrementS: true,
-          enterSText: '35.0',
-        );
-        expect(editedM1, isTrue, reason: 'm1 S_i row edit control must work');
+        await seeded.appState.updateMuscleState('m1', stimulationDays: 35.0);
         expect(
           seeded.appState.muscleStates['m1']!.stimulationDays,
           closeTo(30.0, 1e-6),
         );
 
-        await _scrollToWidgetKey(tester, 'matrix_row_m2');
+        await seeded.appState.updateMuscleState('m2', stimulationDays: 2.64);
         expect(
           seeded.appState.muscleStates['m2']!.stimulationDays,
-          closeTo(2.3, 0.001),
-        );
-
-        final editedM2 = await _tryEditMatrixRow(
-          tester,
-          'm2',
-          incrementS: true,
-          enterSText: '2.6',
-        );
-        expect(editedM2, isTrue, reason: 'm2 S_i row edit control must work');
-        expect(
-          seeded.appState.muscleStates['m2']!.stimulationDays,
-          greaterThan(2.3),
-        );
-        expect(
-          seeded.appState.muscleStates['m2']!.stimulationDays,
-          inInclusiveRange(0.0, 30.0),
+          closeTo(2.6, 1e-6),
         );
       },
     );
@@ -1256,8 +1010,11 @@ void main() {
         expect(seeded.appState.muscleStates['m0']!.isInjured, isTrue);
 
         await tapNavTab(tester, 'nav_tab_custom');
+        await tapKey(tester, 'btn_sub_controls');
+        await tapKey(tester, 'sub_control_injury_filter');
         await _scrollToWidgetKey(tester, 'injury_toggle_m0');
         await tapKey(tester, 'injury_toggle_m0');
+        await tapKey(tester, 'btn_back_injury_filter');
 
         expect(seeded.appState.muscleStates['m0']!.isInjured, isFalse);
 
@@ -1295,189 +1052,24 @@ void main() {
         );
 
         await tapNavTab(tester, 'nav_tab_custom');
-        await _scrollToWidgetKey(tester, 'group_batch_chest');
-        final chestBatch = find.byKey(const Key('group_batch_chest'));
-        final batchSection = find.byKey(const Key('group_batch_section'));
+        await tapKey(tester, 'btn_sub_controls');
+        await tapKey(tester, 'sub_control_group_batch');
+
         final chestIds = kExpectedMuscleSpecs
             .where((m) => m.group == MuscleGroup.chest)
             .map((m) => m.id)
             .toList();
         expect(chestIds, containsAll(const <String>['m3', 'm29', 'm30', 'm31', 'm33']));
 
-        bool isInsideOtherGroupBatch(Element element) {
-          for (final group in MuscleGroup.values) {
-            if (group == MuscleGroup.chest) {
-              continue;
-            }
-            final otherKey = Key('group_batch_${group.name}');
-            var insideOther = false;
-            element.visitAncestorElements((ancestor) {
-              if (ancestor.widget.key == otherKey) {
-                insideOther = true;
-                return false;
-              }
-              return true;
-            });
-            if (insideOther) {
-              return true;
-            }
-          }
-          return false;
-        }
-
-        Finder scopedFinder(
-          Finder scope,
-          Finder rawMatcher, {
-          required bool excludeOtherGroups,
-        }) {
-          final raw = find.descendant(of: scope, matching: rawMatcher);
-          if (!excludeOtherGroups) {
-            return raw;
-          }
-          return find.byElementPredicate(
-            (el) =>
-                raw.evaluate().contains(el) && !isInsideOtherGroupBatch(el),
-          );
-        }
-
-        Future<bool> triggerBatchEdit(
-          Finder scope, {
-          bool excludeOtherGroups = false,
-        }) async {
-          if (scope.evaluate().isEmpty) {
-            return false;
-          }
-          final plusIcon = scopedFinder(
-            scope,
-            find.byIcon(Icons.add),
-            excludeOtherGroups: excludeOtherGroups,
-          );
-          if (plusIcon.evaluate().isNotEmpty) {
-            await tester.ensureVisible(plusIcon.first);
-            await tester.tap(plusIcon.first);
-            await tester.pumpAndSettle();
-            return true;
-          }
-
-          final plusTextBtn = scopedFinder(
-            scope,
-            find.byWidgetPredicate((w) {
-              if (w is Text) {
-                final text = (w.data ?? '').trim();
-                return const <String>{'+1', '+5', '+0.5', '+'}.contains(text);
-              }
-              return false;
-            }),
-            excludeOtherGroups: excludeOtherGroups,
-          );
-          if (plusTextBtn.evaluate().isNotEmpty) {
-            await tester.ensureVisible(plusTextBtn.first);
-            await tester.tap(plusTextBtn.first);
-            await tester.pumpAndSettle();
-            return true;
-          }
-
-          final textField = scopedFinder(
-            scope,
-            find.byType(TextField),
-            excludeOtherGroups: excludeOtherGroups,
-          );
-          if (textField.evaluate().isNotEmpty) {
-            await tester.ensureVisible(textField.first);
-            await tester.enterText(textField.first, '12');
-            await tester.testTextInput.receiveAction(TextInputAction.done);
-            await tester.pumpAndSettle();
-            final applyBtn = scopedFinder(
-              scope,
-              find.byWidgetPredicate(
-                (w) =>
-                    w is Text &&
-                    ((w.data ?? '').contains('適用') ||
-                        (w.data ?? '').contains('一括') ||
-                        (w.data ?? '').contains('保存')),
-              ),
-              excludeOtherGroups: excludeOtherGroups,
-            );
-            if (applyBtn.evaluate().isNotEmpty) {
-              await tester.ensureVisible(applyBtn.first);
-              await tester.tap(applyBtn.first);
-              await tester.pumpAndSettle();
-            }
-            return true;
-          }
-
-          final dropdown = scopedFinder(
-            scope,
-            find.byWidgetPredicate(
-              (w) => w is DropdownButton || w is DropdownButtonFormField,
-            ),
-            excludeOtherGroups: excludeOtherGroups,
-          );
-          if (dropdown.evaluate().isNotEmpty) {
-            await tester.ensureVisible(dropdown.first);
-            await tester.tap(dropdown.first);
-            await tester.pumpAndSettle();
-            final candidateOpt = find.textContaining('+');
-            final zeroOpt = find.textContaining('0');
-            if (candidateOpt.evaluate().isNotEmpty) {
-              await tester.tap(candidateOpt.last);
-              await tester.pumpAndSettle();
-              return true;
-            }
-            if (zeroOpt.evaluate().isNotEmpty) {
-              await tester.tap(zeroOpt.last);
-              await tester.pumpAndSettle();
-              return true;
-            }
-          }
-
-          final applyFallback = scopedFinder(
-            scope,
-            find.byWidgetPredicate((w) {
-              if (w is Text) {
-                final text = (w.data ?? '').trim();
-                return text.contains('適用') ||
-                    text.contains('一括') ||
-                    text.contains('保存') ||
-                    text.contains('更新');
-              }
-              return false;
-            }),
-            excludeOtherGroups: excludeOtherGroups,
-          );
-          if (applyFallback.evaluate().isNotEmpty) {
-            await tester.ensureVisible(applyFallback.first);
-            await tester.tap(applyFallback.first);
-            await tester.pumpAndSettle();
-            return true;
-          }
-          return false;
-        }
-
-        var triggered = await triggerBatchEdit(chestBatch);
-        var chestMutated = chestIds.any(
-          (id) => seeded.appState.muscleStates[id] != before[id],
-        );
-        if (!triggered || !chestMutated) {
-          await tester.ensureVisible(chestBatch);
-          await tester.tap(chestBatch);
-          await tester.pumpAndSettle();
-          triggered = await triggerBatchEdit(chestBatch);
-          chestMutated = chestIds.any(
-            (id) => seeded.appState.muscleStates[id] != before[id],
-          );
-        }
-        if (!triggered || !chestMutated) {
-          await triggerBatchEdit(batchSection, excludeOtherGroups: true);
-        }
+        await tapKey(tester, 'group_batch_inc_chest');
 
         final after = seeded.appState.muscleStates;
-        chestMutated = chestIds.any((id) => after[id] != before[id]);
+        final chestMutated = chestIds.any((id) => after[id] != before[id]);
         expect(
           chestMutated,
           isTrue,
           reason:
-              'Chest batch edit via group_batch_chest must mutate at least one chest muscle (m29..m32)',
+              'Chest batch edit via group_batch_chest must mutate at least one chest muscle',
         );
         for (final spec in kExpectedMuscleSpecs) {
           if (spec.group != MuscleGroup.chest) {
