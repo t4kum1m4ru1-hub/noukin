@@ -101,6 +101,7 @@ class _NoukinHomeShellState extends State<NoukinHomeShell> {
             profile: widget.appState.profile,
             muscleStates: widget.appState.muscleStates,
             machineHistory: widget.appState.machineHistory,
+            availableMachineIds: widget.appState.availableMachineIds,
             sessionCount: widget.appState.sessionCount,
             clock: widget.appState.now,
             generator: widget.appState.generator,

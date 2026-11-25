@@ -1,8 +1,10 @@
 import 'package:flutter/material.dart';
 
+import '../data/master_data.dart';
 import '../models/models.dart';
 import '../state/app_state.dart';
 import '../theme/app_colors.dart';
+import 'machine_selection_screen.dart';
 
 /// 画面 C: ユーザープロファイル設定（性別・誕生年のみ・経験レベル・体重）および認証連携
 class ProfileSettingsScreen extends StatefulWidget {
@@ -198,12 +200,109 @@ class _ProfileSettingsScreenState extends State<ProfileSettingsScreen> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
+                  _buildMachineSelectionCard(context),
+                  const SizedBox(height: 16),
                   _buildProfileCard(),
                   const SizedBox(height: 20),
                   _buildAuthCard(user, isLocalFallback),
                 ],
               ),
             ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildMachineSelectionCard(BuildContext context) {
+    final selectedCount = widget.appState.availableMachineIds.length;
+    final totalCount = MasterData.machines.length;
+    final selectedGym = widget.appState.selectedGym;
+    final isFiltered = selectedCount < totalCount;
+
+    return Material(
+      color: AppColors.surface,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(14),
+        side: const BorderSide(color: AppColors.border),
+      ),
+      child: InkWell(
+        key: const Key('btn_select_machines'),
+        borderRadius: BorderRadius.circular(14),
+        onTap: () {
+          Navigator.of(context).push(
+            MaterialPageRoute<void>(
+              builder: (_) =>
+                  MachineSelectionScreen(appState: widget.appState),
+            ),
+          );
+        },
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+          child: Row(
+            children: [
+              const Icon(
+                Icons.fitness_center,
+                color: AppColors.tealAccent,
+                size: 20,
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text(
+                      'マシンを選択',
+                      style: TextStyle(
+                        fontSize: 15,
+                        fontWeight: FontWeight.bold,
+                        color: AppColors.textPrimary,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      selectedGym != null
+                          ? '選択中のジム: ${selectedGym.name}'
+                          : '利用するジムにある機材を設定します',
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: selectedGym != null
+                            ? AppColors.tealAccent
+                            : AppColors.textSecondary,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                decoration: BoxDecoration(
+                  color: isFiltered
+                      ? AppColors.highlightSelectedSurface
+                      : AppColors.surfaceVariant,
+                  borderRadius: BorderRadius.circular(10),
+                  border: Border.all(
+                    color: isFiltered ? AppColors.tealAccent : AppColors.border,
+                  ),
+                ),
+                child: Text(
+                  '$selectedCount / $totalCount 台',
+                  style: TextStyle(
+                    fontSize: 11,
+                    fontWeight: FontWeight.bold,
+                    color: isFiltered
+                        ? AppColors.tealAccent
+                        : AppColors.textSecondary,
+                  ),
+                ),
+              ),
+              const SizedBox(width: 6),
+              const Icon(
+                Icons.chevron_right,
+                color: AppColors.textSecondary,
+                size: 20,
+              ),
+            ],
           ),
         ),
       ),

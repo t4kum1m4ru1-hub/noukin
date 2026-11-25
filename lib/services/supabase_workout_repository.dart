@@ -2,6 +2,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:uuid/uuid.dart';
 
 import '../config/supabase_config.dart';
+import '../data/master_data.dart';
 import '../models/models.dart';
 import 'workout_repository.dart';
 
@@ -17,6 +18,14 @@ abstract interface class SupabaseWorkoutGateway {
   Future<void> upsertMachineHistoryRows(List<Map<String, dynamic>> rows);
   Future<List<Map<String, dynamic>>> fetchWorkoutSessionRows(String userId);
   Future<void> upsertWorkoutSessionRow(Map<String, dynamic> row);
+  Future<List<Map<String, dynamic>>> fetchUserMachineRows(String userId);
+  Future<void> upsertUserMachineRows(List<Map<String, dynamic>> rows);
+  Future<List<Map<String, dynamic>>> searchGymRows(String query);
+  Future<Map<String, dynamic>?> fetchGymRowById(String gymId);
+  Future<Map<String, dynamic>> insertGymRow(Map<String, dynamic> row);
+  Future<List<Map<String, dynamic>>> fetchGymMachineRows(String gymId);
+  Future<void> upsertGymMachineRows(List<Map<String, dynamic>> rows);
+  Future<void> upsertSelectedGymId(String userId, String? gymId, DateTime updatedAt);
 }
 
 class _PostgrestWorkoutGateway implements SupabaseWorkoutGateway {
@@ -102,6 +111,80 @@ class _PostgrestWorkoutGateway implements SupabaseWorkoutGateway {
   @override
   Future<void> upsertWorkoutSessionRow(Map<String, dynamic> row) async {
     await _client.from('workout_sessions').upsert(row, onConflict: 'id');
+  }
+
+  @override
+  Future<List<Map<String, dynamic>>> fetchUserMachineRows(String userId) async {
+    final rows = await _client
+        .from('user_machines')
+        .select()
+        .eq('user_id', userId);
+    return rows.map((e) => Map<String, dynamic>.from(e)).toList();
+  }
+
+  @override
+  Future<void> upsertUserMachineRows(List<Map<String, dynamic>> rows) async {
+    await _client
+        .from('user_machines')
+        .upsert(rows, onConflict: 'user_id,machine_id');
+  }
+
+  @override
+  Future<List<Map<String, dynamic>>> searchGymRows(String query) async {
+    final trimmed = query.trim();
+    final rows = trimmed.isEmpty
+        ? await _client.from('gyms').select().order('name').limit(30)
+        : await _client
+              .from('gyms')
+              .select()
+              .ilike('name', '%$trimmed%')
+              .order('name')
+              .limit(30);
+    return rows.map((e) => Map<String, dynamic>.from(e)).toList();
+  }
+
+  @override
+  Future<Map<String, dynamic>?> fetchGymRowById(String gymId) {
+    return _client.from('gyms').select().eq('id', gymId).maybeSingle();
+  }
+
+  @override
+  Future<Map<String, dynamic>> insertGymRow(Map<String, dynamic> row) async {
+    final inserted = await _client
+        .from('gyms')
+        .upsert(row, onConflict: 'name')
+        .select()
+        .single();
+    return Map<String, dynamic>.from(inserted);
+  }
+
+  @override
+  Future<List<Map<String, dynamic>>> fetchGymMachineRows(String gymId) async {
+    final rows = await _client
+        .from('gym_machines')
+        .select()
+        .eq('gym_id', gymId);
+    return rows.map((e) => Map<String, dynamic>.from(e)).toList();
+  }
+
+  @override
+  Future<void> upsertGymMachineRows(List<Map<String, dynamic>> rows) async {
+    await _client
+        .from('gym_machines')
+        .upsert(rows, onConflict: 'gym_id,machine_id');
+  }
+
+  @override
+  Future<void> upsertSelectedGymId(
+    String userId,
+    String? gymId,
+    DateTime updatedAt,
+  ) async {
+    await _client.from('user_profiles').upsert(<String, dynamic>{
+      'user_id': userId,
+      'selected_gym_id': gymId,
+      'updated_at': updatedAt.toUtc().toIso8601String(),
+    }, onConflict: 'user_id');
   }
 }
 
@@ -534,6 +617,273 @@ class SupabaseWorkoutRepository implements WorkoutRepository {
           'session_count': normalized,
           'updated_at': _clock().toUtc().toIso8601String(),
         });
+      } catch (_) {
+        // オフライン時はローカル保存のみで継続
+      }
+    }
+  }
+
+  /// `user_machines` テーブル用行リストへ変換する（全マスタマシンについて利用可否を出力）
+  static List<Map<String, dynamic>> userMachinesToRows(
+    Set<String> availableMachineIds, {
+    required String userId,
+    DateTime? updatedAt,
+  }) {
+    final isoNow = (updatedAt ?? DateTime.now()).toUtc().toIso8601String();
+    return MasterData.machines
+        .map(
+          (mac) => <String, dynamic>{
+            'user_id': userId,
+            'machine_id': mac.id,
+            'is_available': availableMachineIds.contains(mac.id),
+            'updated_at': isoNow,
+          },
+        )
+        .toList();
+  }
+
+  /// `user_machines` の行リストから利用可能マシンIDセットを復元する
+  static Set<String> userMachinesFromRows(List<Map<String, dynamic>> rows) {
+    final result = <String>{};
+    for (final row in rows) {
+      final machineId = row['machine_id'] as String?;
+      final isAvailable = row['is_available'] as bool? ?? true;
+      if (machineId != null && machineId.isNotEmpty && isAvailable) {
+        result.add(machineId);
+      }
+    }
+    return result;
+  }
+
+  @override
+  Future<Set<String>?> loadAvailableMachineIds() async {
+    final userId = _resolveUserId();
+    final gateway = _resolveGateway();
+    if (userId != null && userId.isNotEmpty && gateway != null) {
+      try {
+        final rows = await gateway.fetchUserMachineRows(userId);
+        if (rows.isNotEmpty) {
+          final parsed = userMachinesFromRows(rows);
+          if (parsed.isNotEmpty) {
+            await _localCache.saveAvailableMachineIds(parsed);
+            return parsed;
+          }
+        }
+      } catch (_) {
+        // オフライン時はローカルキャッシュへフォールバック
+      }
+    }
+    return _localCache.loadAvailableMachineIds();
+  }
+
+  @override
+  Future<void> saveAvailableMachineIds(Set<String> machineIds) async {
+    await _localCache.saveAvailableMachineIds(machineIds);
+    final userId = _resolveUserId();
+    final gateway = _resolveGateway();
+    if (userId != null && userId.isNotEmpty && gateway != null) {
+      try {
+        await gateway.upsertUserMachineRows(
+          userMachinesToRows(machineIds, userId: userId, updatedAt: _clock()),
+        );
+      } catch (_) {
+        // オフライン時はローカル保存のみで継続
+      }
+    }
+  }
+
+  /// `gym_machines` テーブル用行リストへ変換する
+  static List<Map<String, dynamic>> gymMachinesToRows(
+    Set<String> machineIds, {
+    required String gymId,
+    DateTime? updatedAt,
+  }) {
+    final isoNow = (updatedAt ?? DateTime.now()).toUtc().toIso8601String();
+    return MasterData.machines
+        .map(
+          (mac) => <String, dynamic>{
+            'gym_id': gymId,
+            'machine_id': mac.id,
+            'is_available': machineIds.contains(mac.id),
+            'updated_at': isoNow,
+          },
+        )
+        .toList();
+  }
+
+  /// `gym_machines` の行リストから利用可能マシンIDセットを復元する
+  static Set<String> gymMachinesFromRows(List<Map<String, dynamic>> rows) {
+    final result = <String>{};
+    for (final row in rows) {
+      final machineId = row['machine_id'] as String?;
+      final isAvailable = row['is_available'] as bool? ?? true;
+      if (machineId != null && machineId.isNotEmpty && isAvailable) {
+        result.add(machineId);
+      }
+    }
+    return result;
+  }
+
+  @override
+  Future<List<Gym>> searchGyms(String query) async {
+    final gateway = _resolveGateway();
+    final userId = _resolveUserId();
+    if (userId != null && userId.isNotEmpty && gateway != null) {
+      try {
+        final gymRows = await gateway.searchGymRows(query);
+        final results = <Gym>[];
+        for (final row in gymRows) {
+          final gymId = (row['id'] ?? '').toString();
+          final name = (row['name'] ?? '').toString();
+          if (gymId.isEmpty || name.isEmpty) continue;
+          final machineRows = await gateway.fetchGymMachineRows(gymId);
+          final machineIds = gymMachinesFromRows(machineRows);
+          results.add(
+            Gym(
+              id: gymId,
+              name: name,
+              machineIds: machineIds.isEmpty
+                  ? MasterData.machines.map((m) => m.id).toSet()
+                  : machineIds,
+              updatedAt: row['updated_at'] is String
+                  ? DateTime.tryParse(row['updated_at'] as String)
+                  : null,
+            ),
+          );
+        }
+        // ローカルキャッシュへも統合保存
+        final localGyms = await _localCache.loadAllGyms();
+        final merged = <String, Gym>{
+          for (final g in localGyms) g.id: g,
+          for (final g in results) g.id: g,
+        };
+        await _localCache.saveAllGyms(merged.values.toList());
+        return results;
+      } catch (_) {
+        // オフライン時はローカルキャッシュへフォールバック
+      }
+    }
+    return _localCache.searchGyms(query);
+  }
+
+  @override
+  Future<Gym> registerGym(String name, Set<String> machineIds) async {
+    final gateway = _resolveGateway();
+    final userId = _resolveUserId();
+    if (userId != null && userId.isNotEmpty && gateway != null) {
+      try {
+        final now = _clock();
+        final inserted = await gateway.insertGymRow(<String, dynamic>{
+          'name': name.trim(),
+          'created_by': userId,
+          'updated_at': now.toUtc().toIso8601String(),
+        });
+        final gymId = (inserted['id'] ?? '').toString();
+        if (gymId.isNotEmpty) {
+          await gateway.upsertGymMachineRows(
+            gymMachinesToRows(machineIds, gymId: gymId, updatedAt: now),
+          );
+          final created = Gym(
+            id: gymId,
+            name: (inserted['name'] ?? name.trim()).toString(),
+            machineIds: Set<String>.from(machineIds),
+            updatedAt: now,
+          );
+          final localGyms = await _localCache.loadAllGyms();
+          final merged = <String, Gym>{
+            for (final g in localGyms) g.id: g,
+            created.id: created,
+          };
+          await _localCache.saveAllGyms(merged.values.toList());
+          return created;
+        }
+      } catch (_) {
+        // オフライン時はローカル登録へフォールバック
+      }
+    }
+    return _localCache.registerGym(name, machineIds);
+  }
+
+  @override
+  Future<Gym> updateGymMachines(String gymId, Set<String> machineIds) async {
+    final gateway = _resolveGateway();
+    final userId = _resolveUserId();
+    Gym? updatedLocal;
+    try {
+      updatedLocal = await _localCache.updateGymMachines(gymId, machineIds);
+    } catch (_) {
+      // リモートのみにある店舗の場合は後続のリモート更新後にローカルへ追加
+    }
+
+    if (userId != null && userId.isNotEmpty && gateway != null) {
+      try {
+        final now = _clock();
+        await gateway.upsertGymMachineRows(
+          gymMachinesToRows(machineIds, gymId: gymId, updatedAt: now),
+        );
+        if (updatedLocal != null) {
+          return updatedLocal;
+        }
+        final row = await gateway.fetchGymRowById(gymId);
+        if (row != null) {
+          final updated = Gym(
+            id: gymId,
+            name: (row['name'] ?? '').toString(),
+            machineIds: Set<String>.from(machineIds),
+            updatedAt: now,
+          );
+          final localGyms = await _localCache.loadAllGyms();
+          await _localCache.saveAllGyms(<Gym>[...localGyms, updated]);
+          return updated;
+        }
+      } catch (_) {
+        // オフライン時はローカル更新結果を返す
+      }
+    }
+    if (updatedLocal != null) {
+      return updatedLocal;
+    }
+    throw StateError('Gym not found: $gymId');
+  }
+
+  @override
+  Future<Gym?> loadSelectedGym() async {
+    final userId = _resolveUserId();
+    final gateway = _resolveGateway();
+    if (userId != null && userId.isNotEmpty && gateway != null) {
+      try {
+        final profileRow = await gateway.fetchProfileRow(userId);
+        final gymId = profileRow?['selected_gym_id'] as String?;
+        if (gymId != null && gymId.isNotEmpty) {
+          await _localCache.saveSelectedGymId(gymId);
+          final gymRow = await gateway.fetchGymRowById(gymId);
+          if (gymRow != null) {
+            final machineRows = await gateway.fetchGymMachineRows(gymId);
+            final machineIds = gymMachinesFromRows(machineRows);
+            return Gym(
+              id: gymId,
+              name: (gymRow['name'] ?? '').toString(),
+              machineIds: machineIds.isEmpty
+                  ? MasterData.machines.map((m) => m.id).toSet()
+                  : machineIds,
+            );
+          }
+        }
+      } catch (_) {
+        // オフライン時はローカルキャッシュへフォールバック
+      }
+    }
+    return _localCache.loadSelectedGym();
+  }
+
+  @override
+  Future<void> saveSelectedGymId(String? gymId) async {
+    await _localCache.saveSelectedGymId(gymId);
+    final userId = _resolveUserId();
+    final gateway = _resolveGateway();
+    if (userId != null && userId.isNotEmpty && gateway != null) {
+      try {
+        await gateway.upsertSelectedGymId(userId, gymId, _clock());
       } catch (_) {
         // オフライン時はローカル保存のみで継続
       }

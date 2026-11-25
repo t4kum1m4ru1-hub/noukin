@@ -1,5 +1,6 @@
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:uuid/uuid.dart';
 
 import '../config/supabase_config.dart';
 import '../models/models.dart';
@@ -22,6 +23,15 @@ abstract interface class WorkoutRepository {
 
   Future<int> loadSessionCount();
   Future<void> saveSessionCount(int count);
+
+  Future<Set<String>?> loadAvailableMachineIds();
+  Future<void> saveAvailableMachineIds(Set<String> machineIds);
+
+  Future<List<Gym>> searchGyms(String query);
+  Future<Gym> registerGym(String name, Set<String> machineIds);
+  Future<Gym> updateGymMachines(String gymId, Set<String> machineIds);
+  Future<Gym?> loadSelectedGym();
+  Future<void> saveSelectedGymId(String? gymId);
 }
 
 /// SharedPreferences を用いたオフライン完結・破損耐性ローカルリポジトリ
@@ -244,6 +254,125 @@ class LocalWorkoutRepository implements WorkoutRepository {
       LocalStorageKeys.sessionCount,
       count <= 0 ? 1 : count,
     );
+  }
+
+  @override
+  Future<Set<String>?> loadAvailableMachineIds() async {
+    final list = _storage.readJsonList(LocalStorageKeys.availableMachineIds);
+    if (list == null) {
+      return null;
+    }
+    final result = <String>{};
+    for (final item in list) {
+      if (item is String && item.trim().isNotEmpty) {
+        result.add(item);
+      }
+    }
+    return result;
+  }
+
+  @override
+  Future<void> saveAvailableMachineIds(Set<String> machineIds) async {
+    final sorted = machineIds.toList()..sort();
+    await _storage.writeJson(LocalStorageKeys.availableMachineIds, sorted);
+  }
+
+  static const Uuid _uuid = Uuid();
+
+  Future<List<Gym>> loadAllGyms() async {
+    final list = _storage.readJsonList(LocalStorageKeys.gyms);
+    if (list == null) {
+      return <Gym>[];
+    }
+    final result = <Gym>[];
+    for (final item in list) {
+      if (item is! Map) continue;
+      try {
+        final gym = Gym.fromJson(Map<String, dynamic>.from(item));
+        if (gym.id.isNotEmpty && gym.name.isNotEmpty) {
+          result.add(gym);
+        }
+      } catch (_) {
+        // 破損エントリをスキップ
+      }
+    }
+    return result;
+  }
+
+  Future<void> saveAllGyms(List<Gym> gyms) async {
+    await _storage.writeJson(
+      LocalStorageKeys.gyms,
+      gyms.map((g) => g.toJson()).toList(),
+    );
+  }
+
+  @override
+  Future<List<Gym>> searchGyms(String query) async {
+    final trimmed = query.trim();
+    final gyms = await loadAllGyms();
+    if (trimmed.isEmpty) {
+      return gyms;
+    }
+    return gyms.where((g) => g.name.contains(trimmed)).toList();
+  }
+
+  @override
+  Future<Gym> registerGym(String name, Set<String> machineIds) async {
+    final trimmed = name.trim();
+    final gyms = await loadAllGyms();
+    final existingIdx = gyms.indexWhere((g) => g.name == trimmed);
+    if (existingIdx >= 0) {
+      return gyms[existingIdx];
+    }
+    final created = Gym(
+      id: _uuid.v4().toLowerCase(),
+      name: trimmed,
+      machineIds: Set<String>.from(machineIds),
+      updatedAt: DateTime.now().toUtc(),
+    );
+    await saveAllGyms(<Gym>[...gyms, created]);
+    return created;
+  }
+
+  @override
+  Future<Gym> updateGymMachines(String gymId, Set<String> machineIds) async {
+    final gyms = await loadAllGyms();
+    final idx = gyms.indexWhere((g) => g.id == gymId);
+    if (idx < 0) {
+      throw StateError('Gym not found: $gymId');
+    }
+    final updated = gyms[idx].copyWith(
+      machineIds: Set<String>.from(machineIds),
+      updatedAt: DateTime.now().toUtc(),
+    );
+    final nextList = List<Gym>.from(gyms);
+    nextList[idx] = updated;
+    await saveAllGyms(nextList);
+    return updated;
+  }
+
+  @override
+  Future<Gym?> loadSelectedGym() async {
+    final raw = _storage.prefs.get(LocalStorageKeys.selectedGymId);
+    if (raw is! String || raw.trim().isEmpty) {
+      return null;
+    }
+    final gyms = await loadAllGyms();
+    for (final g in gyms) {
+      if (g.id == raw) {
+        return g;
+      }
+    }
+    return null;
+  }
+
+  @override
+  Future<void> saveSelectedGymId(String? gymId) async {
+    if (gymId == null || gymId.trim().isEmpty) {
+      await _storage.remove(LocalStorageKeys.selectedGymId);
+    } else {
+      await _storage.prefs.setString(LocalStorageKeys.selectedGymId, gymId);
+    }
   }
 }
 

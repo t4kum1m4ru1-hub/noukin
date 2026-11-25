@@ -148,6 +148,7 @@ class WorkoutMenuGenerator {
     int sessionCount = 1,
     WorkoutFeedback? lastFeedback,
     bool highVolumeMode = false,
+    Set<String>? availableMachineIds,
   }) {
     final effectiveNow = now ?? DateTime.now();
     final timeSlot = resolveTimeSlot(effectiveNow);
@@ -186,6 +187,10 @@ class WorkoutMenuGenerator {
     for (var step = 0; step < targetCount; step++) {
       final candidates = <_MachineEval>[];
       for (final mac in MasterData.machines) {
+        if (availableMachineIds != null &&
+            !availableMachineIds.contains(mac.id)) {
+          continue;
+        }
         if (selectedIds.contains(mac.id)) continue;
         final ev = _evaluateMachine(
           machine: mac,

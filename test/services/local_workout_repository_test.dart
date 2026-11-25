@@ -291,5 +291,40 @@ void main() {
       final loaded = await repo.loadSessionHistory();
       expect(loaded.map((e) => e.id).toList(), <String>['c-2', 'c-3', 'c-1']);
     });
+
+    test('saveAvailableMachineIds and loadAvailableMachineIds round-trip sorted IDs', () async {
+      SharedPreferences.setMockInitialValues(<String, Object>{});
+      final prefs = await SharedPreferences.getInstance();
+      final repo = LocalWorkoutRepository(prefs);
+
+      expect(await repo.loadAvailableMachineIds(), isNull);
+
+      await repo.saveAvailableMachineIds(const <String>{'mac16', 'mac1', 'mac11'});
+      expect(
+        await LocalWorkoutRepository(prefs).loadAvailableMachineIds(),
+        const <String>{'mac1', 'mac11', 'mac16'},
+      );
+    });
+
+    test('registerGym, searchGyms, updateGymMachines, and selectedGym round-trip locally', () async {
+      SharedPreferences.setMockInitialValues(<String, Object>{});
+      final prefs = await SharedPreferences.getInstance();
+      final repo = LocalWorkoutRepository(prefs);
+
+      final created = await repo.registerGym('ゴールドジム原宿', const <String>{'mac1', 'mac2'});
+      expect(created.name, 'ゴールドジム原宿');
+
+      final matched = await repo.searchGyms('原宿');
+      expect(matched.length, 1);
+      expect(matched.first.machineIds, const <String>{'mac1', 'mac2'});
+
+      final updated = await repo.updateGymMachines(created.id, const <String>{'mac1', 'mac11'});
+      expect(updated.machineIds, const <String>{'mac1', 'mac11'});
+
+      await repo.saveSelectedGymId(created.id);
+      final selected = await repo.loadSelectedGym();
+      expect(selected?.id, created.id);
+      expect(selected?.machineIds, const <String>{'mac1', 'mac11'});
+    });
   });
 }

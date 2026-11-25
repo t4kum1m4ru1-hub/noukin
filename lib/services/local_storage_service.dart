@@ -10,6 +10,9 @@ abstract final class LocalStorageKeys {
   static const String machineHistory = 'noukin_machine_history';
   static const String sessionHistory = 'noukin_session_history';
   static const String sessionCount = 'noukin_session_count';
+  static const String availableMachineIds = 'noukin_available_machine_ids';
+  static const String gyms = 'noukin_gyms';
+  static const String selectedGymId = 'noukin_selected_gym_id';
 }
 
 /// 破損 JSON や型不整合に対して安全なローカルストレージ読み書きラッパー

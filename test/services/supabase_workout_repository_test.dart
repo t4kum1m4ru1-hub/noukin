@@ -35,12 +35,16 @@ class _FakeSupabaseWorkoutGateway implements SupabaseWorkoutGateway {
   List<Map<String, dynamic>> muscleStateRows = <Map<String, dynamic>>[];
   List<Map<String, dynamic>> machineHistoryRows = <Map<String, dynamic>>[];
   List<Map<String, dynamic>> workoutSessionRows = <Map<String, dynamic>>[];
+  List<Map<String, dynamic>> userMachineRows = <Map<String, dynamic>>[];
+  List<Map<String, dynamic>> gymRows = <Map<String, dynamic>>[];
+  List<Map<String, dynamic>> gymMachineRows = <Map<String, dynamic>>[];
 
   Map<String, dynamic>? lastUpsertedProfileRow;
   Map<String, dynamic>? lastUpsertedSessionCountRow;
   List<Map<String, dynamic>>? lastUpsertedMuscleRows;
   List<Map<String, dynamic>>? lastUpsertedMachineRows;
   Map<String, dynamic>? lastUpsertedSessionRow;
+  List<Map<String, dynamic>>? lastUpsertedUserMachineRows;
 
   bool shouldThrow = false;
 
@@ -120,6 +124,81 @@ class _FakeSupabaseWorkoutGateway implements SupabaseWorkoutGateway {
     _checkError();
     lastUpsertedSessionRow = Map<String, dynamic>.from(row);
     workoutSessionRows.add(lastUpsertedSessionRow!);
+  }
+
+  @override
+  Future<List<Map<String, dynamic>>> fetchUserMachineRows(String userId) async {
+    _checkError();
+    return userMachineRows;
+  }
+
+  @override
+  Future<void> upsertUserMachineRows(List<Map<String, dynamic>> rows) async {
+    _checkError();
+    lastUpsertedUserMachineRows = rows
+        .map((e) => Map<String, dynamic>.from(e))
+        .toList();
+    userMachineRows = lastUpsertedUserMachineRows!;
+  }
+
+  @override
+  Future<List<Map<String, dynamic>>> searchGymRows(String query) async {
+    _checkError();
+    final trimmed = query.trim();
+    if (trimmed.isEmpty) return gymRows;
+    return gymRows
+        .where((r) => (r['name'] as String? ?? '').contains(trimmed))
+        .toList();
+  }
+
+  @override
+  Future<Map<String, dynamic>?> fetchGymRowById(String gymId) async {
+    _checkError();
+    for (final r in gymRows) {
+      if (r['id'] == gymId) return r;
+    }
+    return null;
+  }
+
+  @override
+  Future<Map<String, dynamic>> insertGymRow(Map<String, dynamic> row) async {
+    _checkError();
+    final existingIdx = gymRows.indexWhere((r) => r['name'] == row['name']);
+    if (existingIdx >= 0) return gymRows[existingIdx];
+    final created = <String, dynamic>{
+      'id': 'gym-${gymRows.length + 1}',
+      ...row,
+    };
+    gymRows.add(created);
+    return created;
+  }
+
+  @override
+  Future<List<Map<String, dynamic>>> fetchGymMachineRows(String gymId) async {
+    _checkError();
+    return gymMachineRows.where((r) => r['gym_id'] == gymId).toList();
+  }
+
+  @override
+  Future<void> upsertGymMachineRows(List<Map<String, dynamic>> rows) async {
+    _checkError();
+    final gymId = rows.firstOrNull?['gym_id'];
+    gymMachineRows.removeWhere((r) => r['gym_id'] == gymId);
+    gymMachineRows.addAll(rows.map((e) => Map<String, dynamic>.from(e)));
+  }
+
+  @override
+  Future<void> upsertSelectedGymId(
+    String userId,
+    String? gymId,
+    DateTime updatedAt,
+  ) async {
+    _checkError();
+    profileRow = <String, dynamic>{
+      ...?profileRow,
+      'user_id': userId,
+      'selected_gym_id': gymId,
+    };
   }
 }
 
@@ -495,6 +574,67 @@ void main() {
       gateway.shouldThrow = true;
       final mergedOffline = await repo.loadSessionHistory();
       expect(mergedOffline, mergedOnline);
+    });
+
+    test('saveAvailableMachineIds and loadAvailableMachineIds sync with Supabase user_machines and fallback offline', () async {
+      SharedPreferences.setMockInitialValues(<String, Object>{});
+      final prefs = await SharedPreferences.getInstance();
+      final local = LocalWorkoutRepository(prefs);
+      final gateway = _FakeSupabaseWorkoutGateway();
+
+      final repo = SupabaseWorkoutRepository(
+        localCache: local,
+        remoteGateway: gateway,
+        userIdProvider: () => 'uid-machines-1',
+      );
+
+      const selected = <String>{'mac1', 'mac11', 'mac16'};
+      await repo.saveAvailableMachineIds(selected);
+
+      expect(gateway.lastUpsertedUserMachineRows, isNotNull);
+      expect(gateway.lastUpsertedUserMachineRows!.length, MasterData.machines.length);
+      expect(await local.loadAvailableMachineIds(), selected);
+
+      final loadedOnline = await repo.loadAvailableMachineIds();
+      expect(loadedOnline, selected);
+
+      gateway.shouldThrow = true;
+      final loadedOffline = await repo.loadAvailableMachineIds();
+      expect(loadedOffline, selected);
+    });
+
+    test('registerGym, searchGyms, updateGymMachines, and selectedGym sync with Supabase and fallback offline', () async {
+      SharedPreferences.setMockInitialValues(<String, Object>{});
+      final prefs = await SharedPreferences.getInstance();
+      final local = LocalWorkoutRepository(prefs);
+      final gateway = _FakeSupabaseWorkoutGateway();
+
+      final repo = SupabaseWorkoutRepository(
+        localCache: local,
+        remoteGateway: gateway,
+        userIdProvider: () => 'uid-gym-1',
+      );
+
+      final created = await repo.registerGym('エニタイム渋谷', const <String>{'mac1', 'mac11'});
+      expect(created.name, 'エニタイム渋谷');
+      expect(created.machineIds, const <String>{'mac1', 'mac11'});
+
+      final found = await repo.searchGyms('渋谷');
+      expect(found.length, 1);
+      expect(found.first.id, created.id);
+
+      final updated = await repo.updateGymMachines(created.id, const <String>{'mac1', 'mac11', 'mac16'});
+      expect(updated.machineIds, const <String>{'mac1', 'mac11', 'mac16'});
+
+      await repo.saveSelectedGymId(created.id);
+      final selected = await repo.loadSelectedGym();
+      expect(selected?.id, created.id);
+      expect(selected?.machineIds, const <String>{'mac1', 'mac11', 'mac16'});
+
+      gateway.shouldThrow = true;
+      final offlineFound = await repo.searchGyms('渋谷');
+      expect(offlineFound.length, 1);
+      expect(offlineFound.first.machineIds, const <String>{'mac1', 'mac11', 'mac16'});
     });
   });
 }

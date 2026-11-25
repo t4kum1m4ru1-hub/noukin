@@ -42,6 +42,10 @@ class AppState extends ChangeNotifier {
   List<WorkoutSessionRecord> _sessionHistory = const <WorkoutSessionRecord>[];
   int _sessionCount = 1;
   MenuGenerationResult? _lastMenuResult;
+  Set<String> _availableMachineIds = MasterData.machines
+      .map((m) => m.id)
+      .toSet();
+  Gym? _selectedGym;
 
   AppState({
     AuthService? authService,
@@ -77,6 +81,9 @@ class AppState extends ChangeNotifier {
       List<WorkoutSessionRecord>.unmodifiable(_sessionHistory);
   int get sessionCount => _sessionCount;
   MenuGenerationResult? get lastMenuResult => _lastMenuResult;
+  Set<String> get availableMachineIds =>
+      Set<String>.unmodifiable(_availableMachineIds);
+  Gym? get selectedGym => _selectedGym;
 
   WorkoutFeedback? get lastWorkoutFeedback =>
       _sessionHistory.isNotEmpty ? _sessionHistory.last.feedback : null;
@@ -137,6 +144,16 @@ class AppState extends ChangeNotifier {
 
       final loadedSessions = await repo.loadSessionHistory();
       final loadedCount = await repo.loadSessionCount();
+      final loadedMachineIds = await repo.loadAvailableMachineIds();
+      final loadedSelectedGym = await repo.loadSelectedGym();
+
+      final validMasterIds = MasterData.machines.map((m) => m.id).toSet();
+      final sanitizedMachineIds = loadedMachineIds == null
+          ? validMasterIds
+          : loadedMachineIds.where(validMasterIds.contains).toSet();
+      final effectiveMachineIds = sanitizedMachineIds.isEmpty
+          ? validMasterIds
+          : sanitizedMachineIds;
 
       if (loadedMuscles.isEmpty) {
         await repo.saveMuscleStates(mergedMuscles);
@@ -151,6 +168,8 @@ class AppState extends ChangeNotifier {
       _machineHistory = mergedHistory;
       _sessionHistory = List<WorkoutSessionRecord>.unmodifiable(loadedSessions);
       _sessionCount = loadedCount <= 0 ? 1 : loadedCount;
+      _availableMachineIds = effectiveMachineIds;
+      _selectedGym = loadedSelectedGym;
       _isInitialized = true;
       notifyListeners();
     } catch (_) {
@@ -444,6 +463,121 @@ class AppState extends ChangeNotifier {
     if (purposeChanged) {
       await repo.saveMuscleStates(_muscleStates);
     }
+  }
+
+  /// 指定マシンの利用可否を切り替える（最低1台は必須のため、最後の1台をOFFにはできない）
+  Future<bool> toggleMachineAvailability(String machineId) async {
+    final validIds = MasterData.machines.map((m) => m.id).toSet();
+    if (!validIds.contains(machineId)) return false;
+
+    final next = Set<String>.from(_availableMachineIds);
+    if (next.contains(machineId)) {
+      if (next.length <= 1) {
+        return false;
+      }
+      next.remove(machineId);
+    } else {
+      next.add(machineId);
+    }
+
+    _availableMachineIds = next;
+    notifyListeners();
+
+    final repo = await _ensureRepository();
+    await repo.saveAvailableMachineIds(_availableMachineIds);
+    return true;
+  }
+
+  /// 指定カテゴリの全マシンの利用可否を一括設定する（全体で0台になる場合は変更しない）
+  Future<bool> setCategoryMachinesAvailability(
+    MuscleGroup group,
+    bool isAvailable,
+  ) async {
+    final groupIds = MasterData.machines
+        .where((m) => m.category == group)
+        .map((m) => m.id)
+        .toSet();
+    if (groupIds.isEmpty) return false;
+
+    final next = Set<String>.from(_availableMachineIds);
+    if (isAvailable) {
+      next.addAll(groupIds);
+    } else {
+      next.removeAll(groupIds);
+      if (next.isEmpty) {
+        return false;
+      }
+    }
+
+    _availableMachineIds = next;
+    notifyListeners();
+
+    final repo = await _ensureRepository();
+    await repo.saveAvailableMachineIds(_availableMachineIds);
+    return true;
+  }
+
+  /// すべてのマシンを利用可能（全選択）にする
+  Future<void> selectAllMachines() async {
+    _availableMachineIds = MasterData.machines.map((m) => m.id).toSet();
+    notifyListeners();
+
+    final repo = await _ensureRepository();
+    await repo.saveAvailableMachineIds(_availableMachineIds);
+  }
+
+  /// 利用可能マシンリストと選択中のジム店舗を一括保存する
+  Future<void> saveMachineSelection({
+    required Set<String> machineIds,
+    Gym? selectedGym,
+    bool updateSelectedGym = true,
+  }) async {
+    final validIds = MasterData.machines.map((m) => m.id).toSet();
+    final filtered = machineIds.where(validIds.contains).toSet();
+    if (filtered.isEmpty) {
+      return;
+    }
+
+    _availableMachineIds = filtered;
+    if (updateSelectedGym) {
+      _selectedGym = selectedGym;
+    }
+    notifyListeners();
+
+    final repo = await _ensureRepository();
+    await repo.saveAvailableMachineIds(_availableMachineIds);
+    if (updateSelectedGym) {
+      await repo.saveSelectedGymId(_selectedGym?.id);
+    }
+  }
+
+  /// ジム店舗を部分一致検索する
+  Future<List<Gym>> searchGyms(String query) async {
+    final repo = await _ensureRepository();
+    return repo.searchGyms(query);
+  }
+
+  /// 新しいジム店舗を機材リスト付きで登録する
+  Future<Gym> registerGym(String name, Set<String> machineIds) async {
+    final repo = await _ensureRepository();
+    final created = await repo.registerGym(name, machineIds);
+    _selectedGym = created;
+    notifyListeners();
+    await repo.saveSelectedGymId(created.id);
+    return created;
+  }
+
+  /// 選択中のジム店舗の共有機材リストを更新する
+  Future<Gym> updateGymMachines(String gymId, Set<String> machineIds) async {
+    final repo = await _ensureRepository();
+    final updated = await repo.updateGymMachines(gymId, machineIds);
+    if (_selectedGym?.id == updated.id) {
+      _selectedGym = updated;
+    }
+    _availableMachineIds = Set<String>.from(updated.machineIds);
+    notifyListeners();
+    await repo.saveAvailableMachineIds(_availableMachineIds);
+    return updated;
   }
 
   /// Google OAuth（または未設定時のローカルフォールバック）でログインする

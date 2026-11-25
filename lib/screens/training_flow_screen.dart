@@ -28,6 +28,7 @@ class TrainingFlowScreen extends StatefulWidget {
   final UserProfile profile;
   final Map<String, MuscleInputState> muscleStates;
   final Map<String, MachineHistoryEntry> machineHistory;
+  final Set<String>? availableMachineIds;
   final int sessionCount;
   final DateTime Function()? clock;
   final WorkoutMenuGenerator generator;
@@ -40,6 +41,7 @@ class TrainingFlowScreen extends StatefulWidget {
     required this.profile,
     required this.muscleStates,
     required this.machineHistory,
+    this.availableMachineIds,
     this.sessionCount = 1,
     this.clock,
     this.generator = const WorkoutMenuGenerator(),
@@ -71,6 +73,7 @@ class _TrainingFlowScreenState extends State<TrainingFlowScreen> {
       focusMuscleId: focusMuscleId,
       now: now,
       sessionCount: widget.sessionCount,
+      availableMachineIds: widget.availableMachineIds,
     );
 
     if (menuResult.exercises.isEmpty) {

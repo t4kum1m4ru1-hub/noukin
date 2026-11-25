@@ -35,6 +35,7 @@ void main() {
         // Navigate to Screen C
         await tester.tap(find.byKey(const Key('nav_tab_settings')));
         await tester.pumpAndSettle();
+        expect(find.byKey(const Key('btn_select_machines')), findsOneWidget);
         expect(find.byKey(const Key('gender_selector')), findsOneWidget);
         expect(find.byKey(const Key('birth_year_input')), findsOneWidget);
         expect(find.byKey(const Key('experience_selector')), findsOneWidget);
@@ -190,6 +191,195 @@ void main() {
         await tester.tap(find.byKey(const Key('btn_back_injury_filter')));
         await tester.pumpAndSettle();
         expect(find.byKey(const Key('btn_sub_controls')), findsOneWidget);
+      },
+    );
+
+    testWidgets(
+      'Screen C Machine Selection: navigates from profile top button, enforces minimum 1 machine, and filters generated menu',
+      (WidgetTester tester) async {
+        final appState = AppState(clock: () => DateTime(2026, 11, 25, 10, 0));
+        await appState.initialize();
+
+        await tester.pumpWidget(NoukinApp(appState: appState));
+        await tester.pumpAndSettle();
+
+        await tester.tap(find.byKey(const Key('nav_tab_settings')));
+        await tester.pumpAndSettle();
+
+        final selectMachinesBtn = find.byKey(const Key('btn_select_machines'));
+        expect(selectMachinesBtn, findsOneWidget);
+        expect(
+          find.descendant(
+            of: selectMachinesBtn,
+            matching: find.text('29 / 29 台'),
+          ),
+          findsOneWidget,
+        );
+
+        await tester.tap(selectMachinesBtn);
+        await tester.pumpAndSettle();
+
+        expect(find.byKey(const Key('machine_selection_list')), findsOneWidget);
+        expect(find.byKey(const Key('btn_search_gym')), findsOneWidget);
+        expect(find.byKey(const Key('btn_save_machines')), findsOneWidget);
+        expect(find.byKey(const Key('btn_select_all_machines')), findsNothing);
+        expect(find.textContaining('利用可能なマシン'), findsNothing);
+        for (final group in MuscleGroup.values) {
+          expect(
+            find.byKey(Key('machine_group_${group.name}')),
+            findsOneWidget,
+          );
+        }
+
+        // Disable all groups except chest so only chest machines remain
+        for (final group in MuscleGroup.values) {
+          if (group == MuscleGroup.chest) continue;
+          final toggleBtn = find.byKey(
+            Key('machine_group_toggle_${group.name}'),
+          );
+          await tester.ensureVisible(toggleBtn);
+          await tester.tap(toggleBtn);
+          await tester.pumpAndSettle();
+        }
+
+        // Disable all chest machines except mac11 (keep 1 machine)
+        final chestMachines = MasterData.machines
+            .where((m) => m.category == MuscleGroup.chest)
+            .toList();
+        for (final mac in chestMachines) {
+          if (mac.id == 'mac11') continue;
+          final card = find.byKey(Key('machine_toggle_${mac.id}'));
+          await tester.ensureVisible(card);
+          await tester.tap(card);
+          await tester.pumpAndSettle();
+        }
+
+        // Trying to disable the last remaining machine must be rejected
+        final lastCard = find.byKey(const Key('machine_toggle_mac11'));
+        await tester.ensureVisible(lastCard);
+        await tester.tap(lastCard);
+        await tester.pumpAndSettle();
+        expect(find.text('最低1台以上のマシンを選択してください'), findsOneWidget);
+
+        // Draft mode: AppState is not mutated until Save is pressed
+        expect(appState.availableMachineIds.length, 29);
+
+        // Tap Save button to persist draft and pop back to Screen C
+        await tester.tap(find.byKey(const Key('btn_save_machines')));
+        await tester.pumpAndSettle();
+        expect(appState.availableMachineIds, equals(const <String>{'mac11'}));
+        expect(
+          find.descendant(
+            of: find.byKey(const Key('btn_select_machines')),
+            matching: find.text('1 / 29 台'),
+          ),
+          findsOneWidget,
+        );
+
+        // Start workout on Screen A and verify only mac11 is prescribed
+        await tester.tap(find.byKey(const Key('nav_tab_training')));
+        await tester.pump(const Duration(seconds: 5));
+        await tester.pumpAndSettle();
+        final startBtn = find.byKey(const Key('btn_start_workout'));
+        await tester.ensureVisible(startBtn);
+        await tester.tap(startBtn);
+        await tester.pumpAndSettle();
+        expect(
+          appState.lastMenuResult!.exercises.map((e) => e.machine.id).toList(),
+          equals(const <String>['mac11']),
+        );
+      },
+    );
+
+    testWidgets(
+      'Gym search validates Japanese-only input, registers new gym, links machines, and updates gym master only via bottom button',
+      (WidgetTester tester) async {
+        final appState = AppState(clock: () => DateTime(2026, 11, 25, 11, 0));
+        await appState.initialize();
+
+        await tester.pumpWidget(NoukinApp(appState: appState));
+        await tester.pumpAndSettle();
+
+        await tester.tap(find.byKey(const Key('nav_tab_settings')));
+        await tester.pumpAndSettle();
+        await tester.tap(find.byKey(const Key('btn_select_machines')));
+        await tester.pumpAndSettle();
+
+        // Open Gym Search sheet
+        await tester.tap(find.byKey(const Key('btn_search_gym')));
+        await tester.pumpAndSettle();
+
+        // Non-Japanese input (alphanumeric) shows validation error and disables register/search
+        await tester.enterText(
+          find.byKey(const Key('gym_search_input')),
+          'Anytime123',
+        );
+        await tester.pumpAndSettle();
+        expect(find.text('カタカナ・ひらがな・漢字のみ入力できます'), findsOneWidget);
+        expect(find.byKey(const Key('btn_register_gym')), findsNothing);
+
+        // Valid Japanese input (カタカナ・ひらがな・漢字) enables search & register
+        await tester.enterText(
+          find.byKey(const Key('gym_search_input')),
+          'エニタイム渋谷',
+        );
+        await tester.pumpAndSettle();
+        expect(find.text('カタカナ・ひらがな・漢字のみ入力できます'), findsNothing);
+
+        await tester.tap(find.byKey(const Key('btn_execute_gym_search')));
+        await tester.pumpAndSettle();
+        expect(find.byKey(const Key('btn_register_gym')), findsOneWidget);
+
+        // Register new gym
+        await tester.tap(find.byKey(const Key('btn_register_gym')));
+        await tester.pumpAndSettle();
+        expect(find.text('選択中のジム: エニタイム渋谷'), findsOneWidget);
+
+        // Personal toggle + Save does NOT overwrite gym master list
+        final mac1Card = find.byKey(const Key('machine_toggle_mac1'));
+        await tester.ensureVisible(mac1Card);
+        await tester.tap(mac1Card);
+        await tester.pumpAndSettle();
+        await tester.tap(find.byKey(const Key('btn_save_machines')));
+        await tester.pumpAndSettle();
+
+        expect(appState.availableMachineIds.contains('mac1'), isFalse);
+        expect(appState.selectedGym!.machineIds.contains('mac1'), isTrue);
+
+        // Re-open Machine Selection and use bottom button to update gym master list
+        await tester.tap(find.byKey(const Key('btn_select_machines')));
+        await tester.pumpAndSettle();
+
+        final editGymBtn = find.byKey(const Key('btn_edit_gym_machines'));
+        await tester.ensureVisible(editGymBtn);
+        await tester.tap(editGymBtn);
+        await tester.pumpAndSettle();
+        expect(
+          find.byKey(const Key('gym_master_editing_banner')),
+          findsOneWidget,
+        );
+
+        // Toggle mac1 off in gym master edit mode and trigger update
+        await tester.ensureVisible(mac1Card);
+        await tester.tap(mac1Card);
+        await tester.pumpAndSettle();
+
+        final updateGymBtn = find.byKey(const Key('btn_update_gym_machines'));
+        await tester.ensureVisible(updateGymBtn);
+        await tester.tap(updateGymBtn);
+        await tester.pumpAndSettle();
+
+        // Confirmation dialog appears
+        expect(
+          find.byKey(const Key('confirm_update_gym_dialog')),
+          findsOneWidget,
+        );
+        expect(find.text('ジムの機材リストを更新しますか？'), findsOneWidget);
+
+        await tester.tap(find.byKey(const Key('btn_confirm_update_gym')));
+        await tester.pumpAndSettle();
+
+        expect(appState.selectedGym!.machineIds.contains('mac1'), isFalse);
       },
     );
 
