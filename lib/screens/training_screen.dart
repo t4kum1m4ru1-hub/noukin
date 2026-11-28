@@ -2,9 +2,11 @@ import 'dart:async';
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import '../controllers/training_session_controller.dart';
 import '../models/models.dart';
+import '../services/earphone_audio_service.dart';
 import '../theme/app_colors.dart';
 
 /// 画面 A2: トレーニング中画面（noukin_app UI 忠実移植）
@@ -25,12 +27,14 @@ class TrainingScreen extends StatefulWidget {
 }
 
 class _TrainingScreenState extends State<TrainingScreen> {
+  final FocusNode _keyboardFocusNode = FocusNode();
   bool _hasNavigatedToReview = false;
 
   @override
   void initState() {
     super.initState();
     widget.controller.addListener(_onControllerChanged);
+    KeyEventChannelDispatcher.instance.registerListener(_onHardwareKeyAction);
   }
 
   @override
@@ -45,7 +49,9 @@ class _TrainingScreenState extends State<TrainingScreen> {
 
   @override
   void dispose() {
+    KeyEventChannelDispatcher.instance.unregisterListener(_onHardwareKeyAction);
     widget.controller.removeListener(_onControllerChanged);
+    _keyboardFocusNode.dispose();
     super.dispose();
   }
 
@@ -55,18 +61,79 @@ class _TrainingScreenState extends State<TrainingScreen> {
     }
   }
 
+  void _onHardwareKeyAction(ButtonAction action) {
+    if (!mounted || _hasNavigatedToReview) return;
+    final isCurrentRoute = ModalRoute.of(context)?.isCurrent ?? true;
+    if (!isCurrentRoute) return;
+    unawaited(_handleButtonAction(action));
+  }
+
+  Future<void> _handleButtonAction(ButtonAction action) async {
+    if (_hasNavigatedToReview) return;
+    final completed = widget.controller.handleButtonAction(action);
+    if (!completed) return;
+    await _completeAndNavigate();
+  }
+
   Future<void> _handlePrimaryAction() async {
     if (_hasNavigatedToReview) return;
     final completed = widget.controller.advanceOrComplete();
     if (!completed) return;
+    await _completeAndNavigate();
+  }
+
+  Future<void> _completeAndNavigate() async {
+    if (_hasNavigatedToReview) return;
     _hasNavigatedToReview = true;
+    unawaited(KeyEventChannelDispatcher.instance.setInterceptionEnabled(false));
     try {
       await widget.onCompleted?.call();
     } finally {
       if (mounted) {
         _hasNavigatedToReview = false;
+        final isCurrentRoute = ModalRoute.of(context)?.isCurrent ?? true;
+        if (isCurrentRoute) {
+          unawaited(
+            KeyEventChannelDispatcher.instance.setInterceptionEnabled(true),
+          );
+        }
       }
     }
+  }
+
+  /// PC/デスクトップ検証用のキーボードショートカット処理
+  KeyEventResult _handleKeyboardEvent(FocusNode node, KeyEvent event) {
+    if (event is! KeyDownEvent || _hasNavigatedToReview) {
+      return KeyEventResult.ignored;
+    }
+    final key = event.logicalKey;
+
+    if (key == LogicalKeyboardKey.space ||
+        key == LogicalKeyboardKey.mediaPlayPause) {
+      unawaited(_handleButtonAction(ButtonAction.mediaPlayPause));
+      return KeyEventResult.handled;
+    }
+    if (key == LogicalKeyboardKey.arrowLeft ||
+        key == LogicalKeyboardKey.mediaTrackPrevious) {
+      unawaited(_handleButtonAction(ButtonAction.mediaPrevious));
+      return KeyEventResult.handled;
+    }
+    if (key == LogicalKeyboardKey.arrowRight ||
+        key == LogicalKeyboardKey.mediaTrackNext) {
+      unawaited(_handleButtonAction(ButtonAction.mediaNext));
+      return KeyEventResult.handled;
+    }
+    if (key == LogicalKeyboardKey.arrowUp ||
+        key == LogicalKeyboardKey.audioVolumeUp) {
+      unawaited(_handleButtonAction(ButtonAction.volumeUp));
+      return KeyEventResult.handled;
+    }
+    if (key == LogicalKeyboardKey.arrowDown ||
+        key == LogicalKeyboardKey.audioVolumeDown) {
+      unawaited(_handleButtonAction(ButtonAction.volumeDown));
+      return KeyEventResult.handled;
+    }
+    return KeyEventResult.ignored;
   }
 
   void _showExerciseSwapBottomSheet() {
@@ -165,7 +232,7 @@ class _TrainingScreenState extends State<TrainingScreen> {
   @override
   Widget build(BuildContext context) {
     final controller = widget.controller;
-    final exercise = controller.currentExerciseOrNull;
+    final exercise = controller.displayedExerciseOrNull;
     if (exercise == null) {
       return Scaffold(
         backgroundColor: AppColors.background,
@@ -194,157 +261,197 @@ class _TrainingScreenState extends State<TrainingScreen> {
       );
     }
 
-    return Scaffold(
-      backgroundColor: AppColors.background,
-      appBar: AppBar(
-        backgroundColor: AppColors.surface,
-        elevation: 0,
-        centerTitle: true,
-        leading: IconButton(
-          key: const Key('training_back_button'),
-          icon: const Icon(Icons.arrow_back),
-          tooltip: 'メイン画面へ戻る',
-          onPressed: widget.onBackPressed ?? () => Navigator.of(context).pop(),
-        ),
-        title: GestureDetector(
-          key: const Key('btn_select_exercise'),
-          onTap: _showExerciseSwapBottomSheet,
-          child: Container(
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-            decoration: BoxDecoration(borderRadius: BorderRadius.circular(10)),
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Flexible(
-                  child: Text(
-                    exercise.machine.name,
-                    key: const Key('exercise_title'),
-                    overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(
-                      fontSize: 22,
-                      fontWeight: FontWeight.bold,
-                      letterSpacing: 1.1,
-                      color: AppColors.textPrimary,
+    final mode = controller.mode;
+    final target = controller.selectedTarget;
+    final isExerciseSelectedInB =
+        mode == TrainingMode.adjustSelect &&
+        target == AdjustmentTarget.exercise;
+    final isExerciseEditingInC =
+        mode == TrainingMode.adjustValue && target == AdjustmentTarget.exercise;
+
+    return Focus(
+      focusNode: _keyboardFocusNode,
+      autofocus: true,
+      onKeyEvent: _handleKeyboardEvent,
+      child: Scaffold(
+        backgroundColor: AppColors.background,
+        appBar: AppBar(
+          backgroundColor: AppColors.surface,
+          elevation: 0,
+          centerTitle: true,
+          leading: IconButton(
+            key: const Key('training_back_button'),
+            icon: const Icon(Icons.arrow_back),
+            tooltip: 'メイン画面へ戻る',
+            onPressed: widget.onBackPressed ?? () => Navigator.of(context).pop(),
+          ),
+          title: GestureDetector(
+            key: const Key('btn_select_exercise'),
+            onTap: _showExerciseSwapBottomSheet,
+            child: AnimatedContainer(
+              duration: const Duration(milliseconds: 160),
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+              decoration: BoxDecoration(
+                color: isExerciseEditingInC
+                    ? AppColors.primaryAccent.withAlpha(45)
+                    : (isExerciseSelectedInB
+                          ? AppColors.tealAccent.withAlpha(35)
+                          : Colors.transparent),
+                borderRadius: BorderRadius.circular(10),
+                border: Border.all(
+                  color: isExerciseEditingInC
+                      ? AppColors.primaryAccent
+                      : (isExerciseSelectedInB
+                            ? AppColors.tealAccent
+                            : Colors.transparent),
+                  width: (isExerciseEditingInC || isExerciseSelectedInB)
+                      ? 2.0
+                      : 1.0,
+                ),
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Flexible(
+                    child: Text(
+                      exercise.machine.name,
+                      key: const Key('exercise_title'),
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        fontSize: isExerciseEditingInC ? 24 : 22,
+                        fontWeight: FontWeight.bold,
+                        letterSpacing: 1.1,
+                        color: isExerciseEditingInC
+                            ? AppColors.primaryAccent
+                            : (isExerciseSelectedInB
+                                  ? AppColors.tealAccent
+                                  : AppColors.textPrimary),
+                      ),
                     ),
                   ),
-                ),
-                const SizedBox(width: 4),
-                const Icon(
-                  Icons.swap_horiz,
-                  size: 18,
-                  color: AppColors.textSecondary,
-                ),
-              ],
+                  const SizedBox(width: 4),
+                  Icon(
+                    Icons.swap_horiz,
+                    size: 18,
+                    color: isExerciseEditingInC
+                        ? AppColors.primaryAccent
+                        : AppColors.textSecondary,
+                  ),
+                ],
+              ),
             ),
           ),
         ),
-      ),
-      body: SafeArea(
-        child: LayoutBuilder(
-          builder: (context, constraints) {
-            final isCompact = constraints.maxHeight < 600;
-            return SingleChildScrollView(
-              padding: const EdgeInsets.symmetric(
-                horizontal: 16.0,
-                vertical: 8.0,
-              ),
-              child: ConstrainedBox(
-                constraints: BoxConstraints(
-                  minHeight: math.max(0.0, constraints.maxHeight - 16),
+        body: SafeArea(
+          child: LayoutBuilder(
+            builder: (context, constraints) {
+              final isCompact = constraints.maxHeight < 600;
+              return SingleChildScrollView(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 16.0,
+                  vertical: 8.0,
                 ),
-                child: IntrinsicHeight(
-                  child: Center(
-                    child: ConstrainedBox(
-                      constraints: const BoxConstraints(maxWidth: 720),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.stretch,
-                        children: [
-                          _buildProgressBadge(controller, exercise),
-                          Expanded(
-                            child: Center(
-                              child: Padding(
-                                padding: const EdgeInsets.symmetric(
-                                  vertical: 8.0,
-                                ),
-                                child: ClipRRect(
-                                  key: const Key('exercise_image'),
-                                  borderRadius: BorderRadius.circular(16),
-                                  child: ConstrainedBox(
-                                    constraints: BoxConstraints(
-                                      maxHeight: isCompact ? 150.0 : 220.0,
-                                    ),
-                                    child: _buildExerciseImage(
-                                      exercise,
-                                      isCompact: isCompact,
+                child: ConstrainedBox(
+                  constraints: BoxConstraints(
+                    minHeight: math.max(0.0, constraints.maxHeight - 16),
+                  ),
+                  child: IntrinsicHeight(
+                    child: Center(
+                      child: ConstrainedBox(
+                        constraints: const BoxConstraints(maxWidth: 720),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          children: [
+                            _buildProgressBadge(controller, exercise),
+                            Expanded(
+                              child: Center(
+                                child: Padding(
+                                  padding: const EdgeInsets.symmetric(
+                                    vertical: 8.0,
+                                  ),
+                                  child: ClipRRect(
+                                    key: const Key('exercise_image'),
+                                    borderRadius: BorderRadius.circular(16),
+                                    child: ConstrainedBox(
+                                      constraints: BoxConstraints(
+                                        maxHeight: isCompact ? 150.0 : 220.0,
+                                      ),
+                                      child: _buildExerciseImage(
+                                        exercise,
+                                        isCompact: isCompact,
+                                      ),
                                     ),
                                   ),
                                 ),
                               ),
                             ),
-                          ),
-                          _buildTargetMusclesBadge(exercise),
-                          Padding(
-                            padding: const EdgeInsets.only(bottom: 10.0),
-                            child: ElevatedButton(
-                              key: const Key('btn_next_workout'),
-                              onPressed: _handlePrimaryAction,
-                              style: ElevatedButton.styleFrom(
-                                backgroundColor: AppColors.primaryAccent,
-                                foregroundColor: AppColors.onPrimaryAccent,
-                                minimumSize: const Size.fromHeight(50),
-                                elevation: 4,
-                                shape: RoundedRectangleBorder(
-                                  borderRadius: BorderRadius.circular(12),
+                            _buildTargetMusclesBadge(exercise),
+                            Padding(
+                              padding: const EdgeInsets.only(bottom: 10.0),
+                              child: ElevatedButton(
+                                key: const Key('btn_next_workout'),
+                                onPressed: _handlePrimaryAction,
+                                style: ElevatedButton.styleFrom(
+                                  backgroundColor: AppColors.primaryAccent,
+                                  foregroundColor: AppColors.onPrimaryAccent,
+                                  minimumSize: const Size.fromHeight(50),
+                                  elevation: 4,
+                                  shape: RoundedRectangleBorder(
+                                    borderRadius: BorderRadius.circular(12),
+                                  ),
+                                ),
+                                child: Text(
+                                  controller.isStarted ? '次へ' : '開始',
+                                  style: const TextStyle(
+                                    fontSize: 18,
+                                    fontWeight: FontWeight.bold,
+                                  ),
                                 ),
                               ),
-                              child: Text(
-                                controller.isStarted ? '次へ' : '開始',
-                                style: const TextStyle(
-                                  fontSize: 18,
-                                  fontWeight: FontWeight.bold,
-                                ),
+                            ),
+                            _buildCounterCard(
+                              cardKey: const Key('card_weight'),
+                              target: AdjustmentTarget.weight,
+                              label: '重量',
+                              valueText: controller.formattedWeightDisplay,
+                              downKey: const Key('btn_weight_down'),
+                              upKey: const Key('btn_weight_up'),
+                              onDown: () => controller.adjustWeight(
+                                -TrainingSessionController.weightStepKg,
+                              ),
+                              onUp: () => controller.adjustWeight(
+                                TrainingSessionController.weightStepKg,
                               ),
                             ),
-                          ),
-                          _buildCounterCard(
-                            cardKey: const Key('card_weight'),
-                            label: '重量',
-                            valueText: controller.formattedWeightDisplay,
-                            downKey: const Key('btn_weight_down'),
-                            upKey: const Key('btn_weight_up'),
-                            onDown: () => controller.adjustWeight(
-                              -TrainingSessionController.weightStepKg,
+                            _buildCounterCard(
+                              cardKey: const Key('card_reps'),
+                              target: AdjustmentTarget.reps,
+                              label: 'レップ数',
+                              valueText: '${controller.reps} 回',
+                              downKey: const Key('btn_reps_down'),
+                              upKey: const Key('btn_reps_up'),
+                              onDown: () => controller.adjustReps(-1),
+                              onUp: () => controller.adjustReps(1),
                             ),
-                            onUp: () => controller.adjustWeight(
-                              TrainingSessionController.weightStepKg,
+                            _buildCounterCard(
+                              cardKey: const Key('card_sets'),
+                              target: AdjustmentTarget.sets,
+                              label: 'セット数',
+                              valueText: '${controller.sets} セット',
+                              downKey: const Key('btn_sets_down'),
+                              upKey: const Key('btn_sets_up'),
+                              onDown: () => controller.adjustSets(-1),
+                              onUp: () => controller.adjustSets(1),
                             ),
-                          ),
-                          _buildCounterCard(
-                            cardKey: const Key('card_reps'),
-                            label: 'レップ数',
-                            valueText: '${controller.reps} 回',
-                            downKey: const Key('btn_reps_down'),
-                            upKey: const Key('btn_reps_up'),
-                            onDown: () => controller.adjustReps(-1),
-                            onUp: () => controller.adjustReps(1),
-                          ),
-                          _buildCounterCard(
-                            cardKey: const Key('card_sets'),
-                            label: 'セット数',
-                            valueText: '${controller.sets} セット',
-                            downKey: const Key('btn_sets_down'),
-                            upKey: const Key('btn_sets_up'),
-                            onDown: () => controller.adjustSets(-1),
-                            onUp: () => controller.adjustSets(1),
-                          ),
-                        ],
+                          ],
+                        ),
                       ),
                     ),
                   ),
                 ),
-              ),
-            );
-          },
+              );
+            },
+          ),
         ),
       ),
     );
@@ -511,6 +618,7 @@ class _TrainingScreenState extends State<TrainingScreen> {
 
   Widget _buildCounterCard({
     required Key cardKey,
+    required AdjustmentTarget target,
     required String label,
     required String valueText,
     required Key downKey,
@@ -518,13 +626,33 @@ class _TrainingScreenState extends State<TrainingScreen> {
     required VoidCallback onDown,
     required VoidCallback onUp,
   }) {
+    final isSelectedInB =
+        widget.controller.mode == TrainingMode.adjustSelect &&
+        widget.controller.selectedTarget == target;
+    final isEditingInC =
+        widget.controller.mode == TrainingMode.adjustValue &&
+        widget.controller.selectedTarget == target;
+
+    final borderColor = isEditingInC
+        ? AppColors.primaryAccent
+        : (isSelectedInB ? AppColors.tealAccent : AppColors.border);
+    final borderWidth = (isEditingInC || isSelectedInB) ? 2.0 : 1.0;
+    final cardColor = isEditingInC
+        ? AppColors.highlightEditingSurface
+        : (isSelectedInB
+              ? AppColors.highlightSelectedSurface
+              : AppColors.surface);
+    final valueColor = isEditingInC
+        ? AppColors.primaryAccent
+        : AppColors.tealAccent;
+
     return Card(
       key: cardKey,
-      color: AppColors.surface,
+      color: cardColor,
       margin: const EdgeInsets.symmetric(vertical: 4),
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(14),
-        side: const BorderSide(color: AppColors.border, width: 1.0),
+        side: BorderSide(color: borderColor, width: borderWidth),
       ),
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
@@ -537,7 +665,7 @@ class _TrainingScreenState extends State<TrainingScreen> {
               onPressed: onDown,
               style: IconButton.styleFrom(
                 backgroundColor: AppColors.surfaceVariant,
-                foregroundColor: AppColors.tealAccent,
+                foregroundColor: valueColor,
                 minimumSize: const Size(44, 44),
               ),
             ),
@@ -547,10 +675,14 @@ class _TrainingScreenState extends State<TrainingScreen> {
                 children: [
                   Text(
                     label,
-                    style: const TextStyle(
+                    style: TextStyle(
                       fontSize: 13,
-                      color: AppColors.textSecondary,
-                      fontWeight: FontWeight.w500,
+                      color: (isEditingInC || isSelectedInB)
+                          ? AppColors.textPrimary
+                          : AppColors.textSecondary,
+                      fontWeight: (isEditingInC || isSelectedInB)
+                          ? FontWeight.bold
+                          : FontWeight.w500,
                     ),
                   ),
                   const SizedBox(height: 2),
@@ -558,10 +690,10 @@ class _TrainingScreenState extends State<TrainingScreen> {
                     fit: BoxFit.scaleDown,
                     child: Text(
                       valueText,
-                      style: const TextStyle(
-                        fontSize: 24,
+                      style: TextStyle(
+                        fontSize: isEditingInC ? 28 : 24,
                         fontWeight: FontWeight.bold,
-                        color: AppColors.tealAccent,
+                        color: valueColor,
                         letterSpacing: 0.5,
                       ),
                     ),
@@ -575,7 +707,7 @@ class _TrainingScreenState extends State<TrainingScreen> {
               onPressed: onUp,
               style: IconButton.styleFrom(
                 backgroundColor: AppColors.surfaceVariant,
-                foregroundColor: AppColors.tealAccent,
+                foregroundColor: valueColor,
                 minimumSize: const Size(44, 44),
               ),
             ),

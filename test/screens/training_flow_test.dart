@@ -1113,9 +1113,9 @@ void main() {
     }
   });
 
-  group('6. R1 static source hygiene check for M4 files', () {
-    test('M4 files contain zero prohibited TTS/media/Gym AI symbols', () {
-      final m4Files = <String>[
+  group('6. Static source hygiene check for training flow files', () {
+    test('training flow files keep UI clean of volume slider, media bar, tutorial, and legacy branding', () {
+      final flowFiles = <String>[
         'lib/controllers/training_session_controller.dart',
         'lib/screens/training_pre_screen.dart',
         'lib/screens/training_screen.dart',
@@ -1123,13 +1123,6 @@ void main() {
         'lib/screens/training_flow_screen.dart',
       ];
       final prohibited = <String>[
-        'flutter_tts',
-        'audio_session',
-        'TtsService',
-        'AudioDuckingController',
-        'SoundEffectService',
-        'ButtonAction',
-        'KeyEventChannelDispatcher',
         'TutorialScreen',
         '_buildVolumeCard',
         '_buildMediaControlBar',
@@ -1137,7 +1130,7 @@ void main() {
         'button_controll_test',
       ];
 
-      for (final relPath in m4Files) {
+      for (final relPath in flowFiles) {
         final content = File(relPath).readAsStringSync();
         for (final token in prohibited) {
           expect(

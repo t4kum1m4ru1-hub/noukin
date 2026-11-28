@@ -6,6 +6,7 @@ import 'package:uuid/uuid.dart';
 import '../controllers/training_session_controller.dart';
 import '../engine/workout_menu_generator.dart';
 import '../models/models.dart';
+import '../services/earphone_audio_service.dart';
 import 'review_screen.dart';
 import 'training_pre_screen.dart';
 import 'training_screen.dart';
@@ -35,6 +36,8 @@ class TrainingFlowScreen extends StatefulWidget {
   final ValueChanged<MenuGenerationResult>? onMenuGenerated;
   final FutureOr<void> Function(WorkoutCompletionResult result)?
   onWorkoutCompleted;
+  final TtsService? ttsService;
+  final SoundEffectService? soundEffectService;
 
   const TrainingFlowScreen({
     super.key,
@@ -47,6 +50,8 @@ class TrainingFlowScreen extends StatefulWidget {
     this.generator = const WorkoutMenuGenerator(),
     this.onMenuGenerated,
     this.onWorkoutCompleted,
+    this.ttsService,
+    this.soundEffectService,
   });
 
   @override
@@ -87,6 +92,8 @@ class _TrainingFlowScreenState extends State<TrainingFlowScreen> {
     final route = MaterialPageRoute<void>(
       builder: (_) => _TrainingSessionRouteHost(
         menuResult: menuResult,
+        ttsService: widget.ttsService,
+        soundEffectService: widget.soundEffectService,
         onCompleted: (a2Context, controller) => _openReviewScreen(
           a2Context: a2Context,
           flowRoute: flowRoute,
@@ -175,6 +182,8 @@ class _TrainingFlowScreenState extends State<TrainingFlowScreen> {
 /// Pushed A2 ルートのライフサイクルに合わせて TrainingSessionController を所有・破棄するホスト
 class _TrainingSessionRouteHost extends StatefulWidget {
   final MenuGenerationResult menuResult;
+  final TtsService? ttsService;
+  final SoundEffectService? soundEffectService;
   final FutureOr<void> Function(
     BuildContext context,
     TrainingSessionController controller,
@@ -184,6 +193,8 @@ class _TrainingSessionRouteHost extends StatefulWidget {
   const _TrainingSessionRouteHost({
     required this.menuResult,
     required this.onCompleted,
+    this.ttsService,
+    this.soundEffectService,
   });
 
   @override
@@ -192,9 +203,25 @@ class _TrainingSessionRouteHost extends StatefulWidget {
 }
 
 class _TrainingSessionRouteHostState extends State<_TrainingSessionRouteHost> {
+  late final AudioDuckingController _duckingController =
+      AudioSessionDuckingController();
+  late final TtsService _ttsService =
+      widget.ttsService ??
+      FlutterTtsService(duckingController: _duckingController);
+  late final SoundEffectService _soundEffectService =
+      widget.soundEffectService ??
+      PlatformSoundEffectService(duckingController: _duckingController);
   late final TrainingSessionController _controller = TrainingSessionController(
     menuResult: widget.menuResult,
+    ttsService: _ttsService,
+    soundEffectService: _soundEffectService,
   );
+
+  @override
+  void initState() {
+    super.initState();
+    unawaited(_ttsService.initialize());
+  }
 
   @override
   void dispose() {

@@ -1435,20 +1435,20 @@ void main() {
     );
 
     test(
-      'T2-F12-03: Platform config audit confirms Noukin branding and zero TTS/media/Gym AI in Android/iOS/Windows/pubspec',
+      'T2-F12-03: Platform config audit confirms Noukin branding, Android earphone/TTS setup, and zero legacy branding',
       () {
         final pubspec = readProjectFile('pubspec.yaml');
         expect(pubspec, contains('name: noukin'));
         expect(pubspec, isNot(contains('button_controll_test')));
-        expect(pubspec, isNot(contains('flutter_tts')));
-        expect(pubspec, isNot(contains('audio_session')));
+        expect(pubspec, contains('flutter_tts'));
+        expect(pubspec, contains('audio_session'));
         expect(RegExp(r'Gym\s*AI', caseSensitive: false).hasMatch(pubspec), isFalse);
 
         if (projectFileExists('android/app/src/main/AndroidManifest.xml')) {
           final manifest = readProjectFile(
             'android/app/src/main/AndroidManifest.xml',
           );
-          expect(manifest, isNot(contains('TTS_SERVICE')));
+          expect(manifest, contains('TTS_SERVICE'));
           expect(manifest, isNot(contains('button_controll_test')));
           expect(
             RegExp(r'Gym\s*AI', caseSensitive: false).hasMatch(manifest),
@@ -1456,11 +1456,14 @@ void main() {
           );
         }
 
-        for (final ktFile in listProjectFiles('android', extension: '.kt')) {
+        final ktFiles = listProjectFiles('android', extension: '.kt');
+        expect(ktFiles, isNotEmpty);
+        for (final ktFile in ktFiles) {
           final content = ktFile.readAsStringSync();
-          expect(content, isNot(contains('dispatchKeyEvent')));
-          expect(content, isNot(contains('key_events')));
-          expect(content, isNot(contains('MethodChannel')));
+          expect(content, contains('dispatchKeyEvent'));
+          expect(content, contains('io.noukin.noukin/key_events'));
+          expect(content, contains('setKeyInterceptionEnabled'));
+          expect(content, contains('MethodChannel'));
           expect(content, isNot(contains('button_controll_test')));
         }
 
@@ -1570,13 +1573,6 @@ void main() {
 
         const prohibitedSymbols = <String>[
           'button_controll_test',
-          'flutter_tts',
-          'audio_session',
-          'TtsService',
-          'AudioDuckingController',
-          'SoundEffectService',
-          'ButtonAction',
-          'KeyEventChannelDispatcher',
           'TutorialScreen',
           '_buildVolumeCard',
           '_buildMediaControlBar',
